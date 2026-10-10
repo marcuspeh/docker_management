@@ -17,7 +17,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from .config import settings
 from .db import init_db, session_scope
 from .errors import register_error_handlers
-from .routers import health
+from .routers import containers, health, networks, scm
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -70,6 +70,9 @@ def create_app() -> FastAPI:
     register_error_handlers(app)
 
     app.include_router(health.router, prefix="/api")
+    app.include_router(scm.router, prefix="/api/scm")
+    app.include_router(containers.router, prefix="/api/containers")
+    app.include_router(networks.router, prefix="/api/networks")
 
     _mount_static_apps(app)
     return app
