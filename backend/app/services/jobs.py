@@ -187,6 +187,8 @@ def load_saved_log(stored: str) -> DeploymentLog:
         data = json.loads(stored or "{}")
     except json.JSONDecodeError:
         return log
+    if not isinstance(data, dict):
+        return log
 
     for entry in data.get("lines", []):
         line = LogLine(seq=entry["seq"], text=entry["text"])

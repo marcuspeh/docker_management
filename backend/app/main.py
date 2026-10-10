@@ -153,9 +153,10 @@ def _mount_static_apps(app: FastAPI) -> None:
                 base_path,
             )
 
-            # No mount for this app, so answer its paths directly.
-            @app.get(f"{base_path}/{{full_path:path}}", include_in_schema=False)
-            async def _missing_app(_full_path: str):
+            # No mount for this app, so answer its paths directly. A path
+            # parameter does not match an empty segment, so the bare base path
+            # needs its own route.
+            async def _missing_app(_full_path: str = ""):
                 return JSONResponse(
                     status_code=404,
                     content={
@@ -166,6 +167,11 @@ def _mount_static_apps(app: FastAPI) -> None:
                         }
                     },
                 )
+
+            app.get(base_path, include_in_schema=False)(_missing_app)
+            app.get(
+                f"{base_path}/{{full_path:path}}", include_in_schema=False
+            )(_missing_app)
 
 
 app = create_app()
