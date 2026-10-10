@@ -13,10 +13,13 @@ from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.staticfiles import StaticFiles
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from .config import settings
 from .db import init_db, session_scope
-from .errors import register_error_handlers
+from .errors import ErrorCode, register_error_handlers
 from .routers import containers, health, networks, scm
 
 logging.basicConfig(level=logging.INFO)
@@ -54,6 +57,46 @@ async def recover_interrupted_deployments() -> None:
             logger.info("Marked %d interrupted deployment(s) as failed", len(stale))
 
 
+class SPAStaticFiles(StaticFiles):
+    """Static files with a per-app SPA fallback and correct cache headers.
+
+    Plain StaticFiles answers 404 for a client-side route such as ``/scm/123``,
+    which would break deep links and refreshes. Anything that does not match a
+    file falls back to this app's own index.html instead, so each app resolves
+    its own routes rather than leaking into the other one.
+    """
+
+    async def get_response(self, path: str, scope) -> Response:
+        try:
+            response = await super().get_response(path, scope)
+        except StarletteHTTPException as exc:
+            if exc.status_code != 404:
+                raise
+            response = None
+
+        if response is None or response.status_code == 404:
+            index = Path(self.directory) / "index.html"
+            if not index.is_file():
+                return JSONResponse(
+                    status_code=404,
+                    content={
+                        "error": {
+                            "code": ErrorCode.NOT_FOUND,
+                            "message": "index.html is missing from this build.",
+                            "detail": {},
+                        }
+                    },
+                )
+            response = FileResponse(index)
+
+        # Hashed asset filenames are immutable; the entry document is not.
+        if path.startswith("assets/"):
+            response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        else:
+            response.headers["Cache-Control"] = "no-cache"
+        return response
+
+
 def create_app() -> FastAPI:
     app = FastAPI(title="Docker Management Portal", version="0.1.0", lifespan=lifespan)
 
@@ -85,8 +128,7 @@ def _mount_static_apps(app: FastAPI) -> None:
     links work. An app whose directory is absent returns 404 and the rest of the
     service keeps working, so either app can be hosted elsewhere.
     """
-    from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
-    from fastapi.staticfiles import StaticFiles
+    from fastapi.responses import RedirectResponse
 
     apps = (
         ("/scm", settings.scm_dist_dir),
@@ -101,29 +143,29 @@ def _mount_static_apps(app: FastAPI) -> None:
         if dist_dir.is_dir():
             app.mount(
                 base_path,
-                StaticFiles(directory=dist_dir, html=True),
+                SPAStaticFiles(directory=dist_dir, html=True),
                 name=f"static{base_path.replace('/', '_')}",
             )
         else:
             logger.warning(
-                "Web app directory %s is missing; %s will not be served", dist_dir, base_path
+                "Web app directory %s is missing; %s will not be served",
+                dist_dir,
+                base_path,
             )
 
-        @app.get(f"{base_path}/{{full_path:path}}", include_in_schema=False)
-        async def _spa_fallback(full_path: str, _dist: Path = dist_dir):
-            index = _dist / "index.html"
-            if not index.is_file():
+            # No mount for this app, so answer its paths directly.
+            @app.get(f"{base_path}/{{full_path:path}}", include_in_schema=False)
+            async def _missing_app(_full_path: str):
                 return JSONResponse(
                     status_code=404,
                     content={
                         "error": {
-                            "code": "NOT_FOUND",
+                            "code": ErrorCode.NOT_FOUND,
                             "message": "Web app is not deployed on this server.",
                             "detail": {},
                         }
                     },
                 )
-            return FileResponse(index, headers={"Cache-Control": "no-cache"})
 
 
 app = create_app()
