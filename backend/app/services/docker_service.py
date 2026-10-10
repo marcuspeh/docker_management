@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import functools
+from collections.abc import AsyncIterator
 from datetime import datetime, timezone
 from typing import Any
 
@@ -96,20 +97,27 @@ def _parse_time(value: str | None) -> datetime | None:
 
 
 def _ports(container) -> list[PortOut]:
+    """Map NetworkSettings.Ports, which is ``{"80/tcp": [bindings] | None}``."""
     ports: list[PortOut] = []
-    for port in (container.attrs.get("NetworkSettings") or {}).get("Ports") or {}:
-        bindings = port.get("Binding") or [{}]
-        host_port = None
-        host_ip = None
-        if bindings and bindings[0]:
-            host_port = bindings[0].get("HostPort")
-            host_ip = bindings[0].get("HostIp")
+    raw = (container.attrs.get("NetworkSettings") or {}).get("Ports") or {}
+
+    for key, bindings in raw.items():
+        container_port, _, protocol = key.partition("/")
+        host_port = host_ip = None
+        if bindings:
+            first = bindings[0]
+            host_port = first.get("HostPort")
+            host_ip = first.get("HostIp")
+        try:
+            port_number = int(container_port)
+        except ValueError:
+            continue
         ports.append(
             PortOut(
-                container_port=int(port.get("PrivatePort") or 0),
+                container_port=port_number,
                 host_port=int(host_port) if host_port else None,
                 host_ip=host_ip,
-                protocol=port.get("Type") or "tcp",
+                protocol=protocol if protocol in ("tcp", "udp") else "tcp",
             )
         )
     return ports
@@ -416,3 +424,82 @@ async def disconnect_container(network_id: str, container_id: str) -> None:
         await _in_thread(lambda: network.disconnect(container))
     except DockerException as exc:
         raise wrap_docker_error(exc, "disconnect the container") from exc
+
+
+# --------------------------------------------------------------------------- #
+# Logs
+# --------------------------------------------------------------------------- #
+async def stream_logs(
+    container_id: str,
+    *,
+    tail: int | str = 200,
+    since: str | None = None,
+) -> AsyncIterator[dict[str, Any]]:
+    """Yield log lines with their stream tagged, then follow live output.
+
+    The SDK's ``follow`` stream merges stdout and stderr together, which loses
+    the distinction the UI needs, so two followers are started with timestamps
+    on and their lines pushed into one queue, each tagged at the source.
+
+    A container started with a TTY reports everything as stdout; there is no
+    separate stderr stream to read in that case.
+
+    Yields a final ``{"type": "end"}`` once the container stops.
+    """
+    container = resolve_container(container_id)
+    queue: asyncio.Queue = asyncio.Queue(maxsize=2000)
+
+    def make_follower(stream: str) -> None:
+        def _pump() -> None:
+            try:
+                for raw in container.logs(
+                    stdout=stream == "stdout",
+                    stderr=stream == "stderr",
+                    timestamps=True,
+                    tail=tail,
+                    since=since or None,
+                    follow=True,
+                ):
+                    ts, _, msg = raw.rstrip("\n").partition(" ")
+                    when = _parse_time(ts) or datetime.now(timezone.utc)
+                    queue.put_nowait(
+                        {
+                            "type": "log",
+                            "time": when.isoformat(),
+                            "stream": stream,
+                            "msg": msg,
+                        }
+                    )
+            except (APIError, DockerException):
+                pass
+            finally:
+                queue.put_nowait({"type": "eof", "stream": stream})
+
+        asyncio.get_running_loop().run_in_executor(None, _pump)
+
+    make_follower("stdout")
+    make_follower("stderr")
+
+    open_streams = 2
+    while open_streams > 0:
+        event = await queue.get()
+        if event.get("type") == "eof":
+            open_streams -= 1
+            continue
+        yield event
+
+    yield {"type": "end"}
+
+
+def _logs_sync(container_id: str, tail: int | str, since: str | None) -> str:
+    container = resolve_container(container_id)
+    out = container.logs(stdout=True, stderr=True, timestamps=False, tail=tail, since=since or None)
+    if isinstance(out, bytes):
+        return out.decode(errors="replace")
+    return out
+
+
+async def download_logs(
+    container_id: str, *, tail: int | str = "all", since: str | None = None
+) -> str:
+    return await _in_thread(_logs_sync, container_id, tail, since)
