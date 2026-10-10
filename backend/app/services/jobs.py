@@ -218,6 +218,11 @@ async def replay_and_follow(
     for line in log.lines_from(offset):
         yield {"type": "line", "line": {"seq": line.seq, "text": line.text}}
 
+    # Steps already emitted before this client connected are replayed too, so a
+    # mid-deploy subscriber sees the same sequence as one present from the start.
+    for step in log.steps:
+        yield {"type": "step", "step": {"step": step.step, "status": step.status}}
+
     async for event in log.subscribe():
         yield event
 

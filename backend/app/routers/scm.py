@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
+import logging
 import uuid
 
 from fastapi import APIRouter, Depends, Query
+from sse_starlette.sse import EventSourceResponse
 from sqlmodel import Session, select
 
 from ..db import get_session
@@ -14,11 +17,18 @@ from ..schemas import (
     BranchesResponse,
     BranchOut,
     CommitOut,
+    ContainerOut,
+    DeployRequest,
+    DeploymentDetail,
+    DeploymentOut,
     RepoCreate,
     RepoOut,
     RepoPatch,
+    StackActionResponse,
 )
 from ..services import git_service as git_svc
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["scm"])
 
@@ -202,3 +212,199 @@ async def get_commits(
         )
     commits = await git_svc.log_commits(git_svc.clone_dir(repo.slug), branch, limit)
     return [CommitOut(**commit) for commit in commits]
+
+
+# --------------------------------------------------------------------------- #
+# Deployments
+# --------------------------------------------------------------------------- #
+def get_deployment_or_404(deployment_id: str, session: Session) -> Deployment:
+    deployment = session.get(Deployment, deployment_id)
+    if deployment is None:
+        raise ApiError(ErrorCode.NOT_FOUND, "Deployment not found.")
+    return deployment
+
+
+@router.post(
+    "/repos/{repo_id}/deployments", response_model=DeploymentOut, status_code=202
+)
+async def create_deployment(
+    repo_id: str, payload: DeployRequest, session: Session = Depends(get_session)
+) -> DeploymentOut:
+    from ..services import deploy as deploy_svc
+    from ..services import jobs
+
+    repo = get_repo_or_404(repo_id, session)
+
+    # One deploy per repo at a time; different repos still run in parallel.
+    running = jobs.active_job_for_repo(repo_id)
+    if running is not None:
+        raise ApiError(
+            ErrorCode.DEPLOY_IN_PROGRESS,
+            "A deployment is already running for this repository.",
+            {"deploymentId": running.id},
+        )
+
+    branch = payload.branch.strip()
+    if not branch:
+        raise ApiError(
+            ErrorCode.INVALID_NAME, "Branch is required.", {"field": "branch"}
+        )
+
+    lock = jobs.repo_lock(repo_id)
+    if lock.locked():
+        raise ApiError(
+            ErrorCode.DEPLOY_IN_PROGRESS,
+            "Another operation is already running for this repository.",
+        )
+
+    deployment = Deployment(
+        id=jobs.new_deployment_id(),
+        repo_id=repo_id,
+        branch=branch,
+        requested_commit=payload.commit,
+        status="queued",
+    )
+    session.add(deployment)
+    session.commit()
+    session.refresh(deployment)
+
+    # Register the job before yielding so an immediate second request sees the
+    # repo as busy instead of racing the background task.
+    jobs.new_job(deployment.id, repo_id)
+
+    async def run_locked() -> None:
+        # The lock is held for the whole pipeline, not just task creation, so
+        # stack actions and further deploys queue behind it.
+        async with lock:
+            try:
+                await deploy_svc.run_pipeline(
+                    deployment.id, repo_id, branch, payload.commit
+                )
+            except Exception:
+                logger.exception("Deployment %s crashed", deployment.id)
+
+    asyncio.create_task(run_locked())
+
+    return deployment
+
+
+@router.get("/repos/{repo_id}/deployments", response_model=list[DeploymentOut])
+def list_deployments(
+    repo_id: str,
+    limit: int = Query(20, ge=1, le=200),
+    session: Session = Depends(get_session),
+) -> list[DeploymentOut]:
+    get_repo_or_404(repo_id, session)
+    return session.exec(
+        select(Deployment)
+        .where(Deployment.repo_id == repo_id)
+        .order_by(Deployment.started_at.desc())
+        .limit(limit)
+    ).all()
+
+
+@router.get("/deployments/{deployment_id}", response_model=DeploymentDetail)
+async def get_deployment(
+    deployment_id: str, session: Session = Depends(get_session)
+) -> DeploymentDetail:
+    from ..services import docker_service
+
+    deployment = get_deployment_or_404(deployment_id, session)
+    repo = get_repo_or_404(deployment.repo_id, session)
+
+    try:
+        containers: list[ContainerOut] = await docker_service.list_project_containers(
+            repo.slug
+        )
+    except Exception:
+        # Docker being unreachable must not hide the deployment record.
+        containers = []
+
+    return DeploymentDetail(**DeploymentOut.model_validate(deployment).model_dump(),
+                            containers=containers)
+
+
+@router.get("/deployments/{deployment_id}/logs")
+async def stream_deployment_logs(
+    deployment_id: str,
+    offset: int = Query(0, ge=0),
+    session: Session = Depends(get_session),
+) -> EventSourceResponse:
+    from ..services import jobs
+
+    deployment = get_deployment_or_404(deployment_id, session)
+
+    live = jobs.get_job(deployment_id)
+    if live is not None:
+        log = live.log
+    else:
+        # A finished (or restarted) deployment replays from its stored log.
+        log = jobs.load_saved_log(deployment.log)
+
+    async def event_source():
+        async for event in jobs.replay_and_follow(log, offset):
+            if event.get("type") == "line":
+                yield {
+                    "event": "line",
+                    "data": _json(event["line"]),
+                }
+            elif event.get("type") == "step":
+                yield {
+                    "event": "step",
+                    "data": _json(event["step"]),
+                }
+            else:
+                yield {"event": "done", "data": _json(event)}
+
+    return EventSourceResponse(event_source(), ping=15)
+
+
+@router.post("/deployments/{deployment_id}/cancel", response_model=DeploymentOut)
+def cancel_deployment(
+    deployment_id: str, session: Session = Depends(get_session)
+) -> DeploymentOut:
+    from ..services import jobs
+
+    deployment = get_deployment_or_404(deployment_id, session)
+    job = jobs.get_job(deployment_id)
+    if job is None or job.finished.is_set():
+        raise ApiError(
+            ErrorCode.INVALID_STATE, "This deployment is no longer running."
+        )
+
+    job.cancel()
+    return deployment
+
+
+def _json(data: dict) -> str:
+    import json
+
+    return json.dumps(data, default=str)
+
+
+# --------------------------------------------------------------------------- #
+# Stack actions
+# --------------------------------------------------------------------------- #
+@router.post("/repos/{repo_id}/stack/{action}", response_model=StackActionResponse)
+async def stack_action(
+    repo_id: str, action: str, session: Session = Depends(get_session)
+) -> StackActionResponse:
+    from ..services import deploy as deploy_svc
+    from ..services import jobs
+
+    if action not in ("up", "stop", "restart", "down"):
+        raise ApiError(ErrorCode.NOT_FOUND, f"Unknown stack action: {action}.")
+
+    repo = get_repo_or_404(repo_id, session)
+
+    lock = jobs.repo_lock(repo_id)
+    if lock.locked():
+        raise ApiError(
+            ErrorCode.DEPLOY_IN_PROGRESS,
+            "Another operation is already running for this repository.",
+        )
+
+    async with lock:
+        containers = await deploy_svc.stack_action(repo, action)
+
+    return StackActionResponse(containers=containers)
