@@ -7,10 +7,7 @@ streaming progress output. Commands are always argument lists.
 from __future__ import annotations
 
 import asyncio
-import functools
 import os
-import subprocess
-from collections.abc import AsyncIterator, Callable
 from pathlib import Path
 
 from ..config import settings
@@ -39,11 +36,6 @@ def compose_argv(
         str(directory),
         *args,
     ]
-
-
-def command_label(argv: list[str]) -> str:
-    """Human-readable form of an argv, logged before the output."""
-    return " ".join(argv)
 
 
 def compose_env(extra: dict[str, str] | None = None) -> dict[str, str]:
@@ -84,40 +76,6 @@ async def stream_command(
     return proc.returncode or 0, (stdout or b"").decode(errors="replace") + (
         stderr or b""
     ).decode(errors="replace")
-
-
-def run_streaming_command_sync(
-    argv: list[str],
-    on_line: Callable[[str], None],
-    *,
-    cwd: Path | None = None,
-    env: dict[str, str] | None = None,
-) -> tuple[int, str]:
-    """Blocking streaming run, intended to be called in a worker thread.
-
-    ``on_line`` receives each output line without its trailing newline. The
-    combined output is returned so callers can include it in error details.
-    """
-    proc = subprocess.Popen(
-        argv,
-        cwd=str(cwd) if cwd else None,
-        env=env or compose_env(),
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        bufsize=1,
-    )
-    collected: list[str] = []
-    assert proc.stdout is not None
-    try:
-        for raw in proc.stdout:
-            line = raw.rstrip("\n")
-            collected.append(line)
-            on_line(line)
-    finally:
-        proc.stdout.close()
-        proc.wait()
-    return proc.returncode, "\n".join(collected)
 
 
 async def run_simple(

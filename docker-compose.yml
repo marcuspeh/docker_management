@@ -1,0 +1,39 @@
+# Portal deployment: the API and the nginx-served web apps.
+#
+# Only nginx binds a host port, and only on the loopback interface: there is no
+# authentication in v1, so the portal must not be reachable from the network.
+
+services:
+  portal:
+    build:
+      context: ./backend
+    # No published port: nginx is the only entry point.
+    expose:
+      - "8000"
+    volumes:
+      # Docker socket access is equivalent to root on the host.
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Clones and the SQLite database. Must be the same path inside and out,
+      # so relative bind mounts inside a deployed compose file resolve on the
+      # host.
+      - /srv/portal:/srv/portal
+      # Read-only SSH keys and known_hosts for private repositories.
+      - ~/.ssh:/root/.ssh:ro
+    environment:
+      WORKSPACE_DIR: /srv/portal/repos
+      DB_URL: sqlite:////srv/portal/portal.db
+      # Left unset: both apps are served from this same origin.
+      # CORS_ORIGINS: https://scm.example.com
+    labels:
+      # Marks this container so the portal excludes and refuses to stop itself.
+      portal.self: "true"
+    restart: unless-stopped
+
+  web:
+    build:
+      context: ./frontend
+    ports:
+      - "127.0.0.1:8000:80"
+    depends_on:
+      - portal
+    restart: unless-stopped
