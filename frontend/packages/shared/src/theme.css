@@ -1,0 +1,32 @@
+@import "tailwindcss";
+
+/* Tailwind only scans this app's own source by default, so point it at the
+   shared package's components or their classes never get generated. */
+@source "../src/ui";
+@source "../src/theme.css";
+
+@theme {
+  --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+
+  --color-surface: #ffffff;
+  --color-canvas: #f8fafc;
+  --color-line: #e2e8f0;
+}
+
+@layer base {
+  html {
+    @apply bg-canvas text-slate-900 antialiased;
+    font-family: var(--font-sans);
+  }
+
+  body {
+    @apply bg-canvas;
+  }
+
+  code,
+  pre,
+  kbd {
+    font-family: var(--font-mono);
+  }
+}
