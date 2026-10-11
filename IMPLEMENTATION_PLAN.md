@@ -56,13 +56,13 @@ flowchart LR
 ## Implementation checklist
 
 **Backend**
-- [ ] Scaffold: FastAPI, settings, SQLModel/SQLite, error envelope, `/api/health`, static hosting for `/scm/` and `/containers/` with per-app SPA fallback
-- [ ] SCM repos API: list/create (validated with `git ls-remote`)/get/patch/delete, branches, optional commits
-- [ ] Job runner: background deployments, sequence-numbered log buffer, step events, SSE replay from offset, cancel
-- [ ] Deploy pipeline: clone-or-fetch, checkout, compose build, compose up -d, re-apply network attachments; stack actions
-- [ ] Containers API: list with filters, stop/start/restart, logs SSE with stdout/stderr tagging, log download
-- [ ] Networks API: list, create, delete with guards, batch connect/disconnect with saved attachments
-- [ ] Tests: unit tests, plus Docker-marked integration tests
+- [x] Scaffold: FastAPI, settings, SQLModel/SQLite, error envelope, `/api/health`, static hosting for `/scm/` and `/containers/` with per-app SPA fallback
+- [x] SCM repos API: list/create (validated with `git ls-remote`)/get/patch/delete, branches, optional commits
+- [x] Job runner: background deployments, sequence-numbered log buffer, step events, SSE replay from offset, cancel
+- [x] Deploy pipeline: clone-or-fetch, checkout, compose build, compose up -d, re-apply network attachments; stack actions
+- [x] Containers API: list with filters, stop/start/restart, logs SSE with stdout/stderr tagging, log download
+- [x] Networks API: list, create, delete with guards, batch connect/disconnect with saved attachments
+- [x] Tests: unit tests, plus Docker-marked integration tests
 
 **Frontend: workspace and shared package**
 - [ ] npm workspace (`apps/*`, `packages/*`), base tsconfig, ESLint with a rule blocking imports between apps
@@ -80,8 +80,8 @@ flowchart LR
 - [ ] Type check, ESLint, Vitest for the shared package and key modals; build and serve each app on its own
 
 **Delivery**
-- [ ] `backend/Dockerfile` (Python runtime plus the Docker CLI and compose plugin), `frontend/Dockerfile` (node build stage into nginx), `nginx.conf`, `docker-compose.yml` wiring both services, README
-- [ ] Manual end-to-end check covering every SCM and Containers interaction from the sample, with each app opened on its own
+- [x] `backend/Dockerfile` (Python runtime plus the Docker CLI and compose plugin), `frontend/Dockerfile` (node build stage into nginx), `nginx.conf`, `docker-compose.yml` wiring both services, README
+- [ ] Manual end-to-end check covering every SCM and Containers interaction from the sample, with each app opened on its own (needs the frontend apps)
 
 ## Out of scope for v1
 - Argos Logs and TCC Configs (pages and backends).
