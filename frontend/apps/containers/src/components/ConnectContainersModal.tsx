@@ -85,6 +85,7 @@ export function ConnectContainersModal({
                 <label className="flex cursor-pointer items-center gap-2.5 rounded-md border border-slate-200 px-3 py-2 transition-colors hover:bg-slate-50">
                   <input
                     type="checkbox"
+                    aria-label={container.name}
                     checked={selected.includes(container.id)}
                     onChange={() => toggle(container.id)}
                     className="size-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
@@ -106,7 +107,10 @@ export function ConnectContainersModal({
         )}
 
         {connect.data && connect.data.failed.length > 0 && (
-          <ul className="flex flex-col gap-1 rounded-md border border-red-200 bg-red-50 px-3 py-2">
+          <ul
+            aria-label="Failed connections"
+            className="flex flex-col gap-1 rounded-md border border-red-200 bg-red-50 px-3 py-2"
+          >
             {connect.data.failed.map((failure) => (
               <li key={failure.containerId} className="text-xs text-red-700">
                 <span className="font-mono">{failure.containerId.slice(0, 12)}</span>:{" "}

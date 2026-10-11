@@ -20,7 +20,7 @@
     "noFallthroughCasesInSwitch": true,
     "noUncheckedSideEffectImports": true,
 
-    "types": ["vite/client"],
+    "types": ["vite/client", "@testing-library/jest-dom"],
     "baseUrl": ".",
     "paths": {
       "@portal/shared": ["packages/shared/src/index.ts"],

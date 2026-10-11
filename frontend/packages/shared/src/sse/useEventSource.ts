@@ -43,6 +43,9 @@ export function useEventSource(
   const [attempts, setAttempts] = useState(0);
   // Bumped to reconnect, which re-reads the resume position.
   const [generation, setGeneration] = useState(0);
+  // Consecutive failed reconnects. A ref, not effect-local state: the effect
+  // re-runs on every attempt and must not reset the count.
+  const failuresRef = useRef(0);
 
   // Handlers and options are read through a ref so a new object identity on
   // every render neither tears the stream down nor serves stale callbacks.
@@ -53,6 +56,7 @@ export function useEventSource(
   });
 
   const reconnect = useCallback(() => {
+    failuresRef.current = 0;
     setAttempts(0);
     setGeneration((n) => n + 1);
   }, []);
@@ -63,7 +67,6 @@ export function useEventSource(
     let source: EventSource | null = null;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let disposed = false;
-    let failures = 0;
 
     const buildUrl = () => {
       const params = latest.current.resume?.() ?? {};
@@ -80,7 +83,7 @@ export function useEventSource(
       setState("connecting");
 
       source.onopen = () => {
-        failures = 0;
+        failuresRef.current = 0;
         setAttempts(0);
         setState("open");
       };
@@ -95,7 +98,8 @@ export function useEventSource(
 
         // The browser also closes after the server's terminal event, so only a
         // close nothing asked for counts as a failed reconnect.
-        failures += 1;
+        failuresRef.current += 1;
+        const failures = failuresRef.current;
         setAttempts(failures);
         if (failures > MAX_RETRIES) {
           setState("failed");
@@ -105,12 +109,17 @@ export function useEventSource(
         timer = setTimeout(() => setGeneration((n) => n + 1), RETRY_DELAY_MS);
       };
 
-      for (const name of latest.current.closeOn) {
+      // Every named event needs its own listener; `message` is already covered
+      // by onmessage above.
+      for (const name of Object.keys(latest.current.handlers)) {
+        if (name === "message") continue;
         source.addEventListener(name, (event) => {
           const message = event as MessageEvent;
           latest.current.handlers[name]?.(parseData(message), message);
-          source?.close();
-          if (!disposed) setState("closed");
+          if (latest.current.closeOn.includes(name)) {
+            source?.close();
+            if (!disposed) setState("closed");
+          }
         });
       }
     };
