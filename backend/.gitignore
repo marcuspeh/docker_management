@@ -10,3 +10,6 @@ build/
 .env
 *.db
 *.sqlite3
+
+# Test scratch space: temporary repos, clones and databases.
+tests/.tmp/

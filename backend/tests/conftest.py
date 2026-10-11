@@ -11,9 +11,9 @@ from pathlib import Path
 
 import pytest
 
-# Point the app at throwaway locations before app modules are imported.
+# Point the app at throwaway locations before app modules are imported. The
+# directories are created on demand, so nothing is written at import time.
 _TMP = Path(__file__).parent / ".tmp"
-_TMP.mkdir(exist_ok=True)
 
 import os  # noqa: E402
 
