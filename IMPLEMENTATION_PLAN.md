@@ -65,19 +65,19 @@ flowchart LR
 - [x] Tests: unit tests, plus Docker-marked integration tests
 
 **Frontend: workspace and shared package**
-- [ ] npm workspace (`apps/*`, `packages/*`), base tsconfig, ESLint with a rule blocking imports between apps
-- [ ] `@portal/shared`: config, API client + `ApiError`, contract types, `useEventSource`, format helpers, UI components, `AppHeader` + `HealthBadge`, Tailwind theme
+- [x] npm workspace (`apps/*`, `packages/*`), base tsconfig, ESLint with a rule blocking imports between apps
+- [x] `@portal/shared`: config, API client + `ApiError`, contract types, `useEventSource`, format helpers, UI components, `AppHeader` + `HealthBadge`, Tailwind theme
 
 **Frontend: SCM app**
-- [ ] Scaffold (Vite react-ts, base `/scm/`, port 5173, `/api` proxy, router, QueryClient)
-- [ ] Repo list and Add Repository modal; repo detail with branch select, deploy, live output with resume, commit hash, history, link to the Containers app
+- [x] Scaffold (Vite react-ts, base `/scm/`, port 5173, `/api` proxy, router, QueryClient)
+- [x] Repo list and Add Repository modal; repo detail with branch select, deploy, live output with resume, commit hash, history, link to the Containers app
 
 **Frontend: Containers app**
-- [ ] Scaffold (Vite react-ts, base `/containers/`, port 5174, `/api` proxy, router, QueryClient)
-- [ ] Networks sidebar and modals, container cards with actions, `repoId` filter, live log panel
+- [x] Scaffold (Vite react-ts, base `/containers/`, port 5174, `/api` proxy, router, QueryClient)
+- [x] Networks sidebar and modals, container cards with actions, `repoId` filter, live log panel
 
 **Frontend: tests**
-- [ ] Type check, ESLint, Vitest for the shared package and key modals; build and serve each app on its own
+- [x] Type check, ESLint, Vitest for the shared package and key modals; build and serve each app on its own
 
 **Delivery**
 - [x] `backend/Dockerfile` (Python runtime plus the Docker CLI and compose plugin), `frontend/Dockerfile` (node build stage into nginx), `nginx.conf`, `docker-compose.yml` wiring both services, README
