@@ -27,7 +27,7 @@ class Settings(BaseSettings):
     cors_origins: list[str] = []
 
     # Production builds of the two web apps.
-    scm_dist_dir: Path = Path("/app/web/scm")
+    deployment_dist_dir: Path = Path("/app/web/deployment")
     containers_dist_dir: Path = Path("/app/web/containers")
 
     # git ls-remote is given a hard timeout so an unreachable or

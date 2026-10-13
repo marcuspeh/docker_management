@@ -3,7 +3,7 @@ import { RepoListPage } from "./pages/RepoListPage";
 import { RepoDetailPage } from "./pages/RepoDetailPage";
 
 /**
- * Routes are relative to the app's base path, so `/scm/` and `/scm/:repoId`
+ * Routes are relative to the app's base path, so `/deployment/` and `/deployment/:repoId`
  * resolve correctly whether the app is served by nginx or by the backend.
  */
 export const router = createBrowserRouter([

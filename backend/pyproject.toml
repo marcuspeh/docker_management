@@ -1,7 +1,7 @@
 [project]
 name = "portal-backend"
 version = "0.1.0"
-description = "FastAPI service behind the SCM and Containers pages"
+description = "FastAPI service behind the Deployment and Containers pages"
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.115",

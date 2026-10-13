@@ -25,7 +25,7 @@ afterEach(() => {
 describe("request", () => {
   it("returns the parsed body", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(respond({ id: "abc" })));
-    await expect(request("/api/scm/repos/abc")).resolves.toEqual({ id: "abc" });
+    await expect(request("/api/deployment/repos/abc")).resolves.toEqual({ id: "abc" });
   });
 
   it("unwraps the backend's error envelope", async () => {
@@ -46,7 +46,7 @@ describe("request", () => {
     );
 
     const error = await failure(
-      request("/api/scm/repos", { method: "POST", body: {} }),
+      request("/api/deployment/repos", { method: "POST", body: {} }),
     );
 
     expect(error).toBeInstanceOf(ApiError);

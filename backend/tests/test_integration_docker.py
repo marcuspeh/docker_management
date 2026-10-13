@@ -57,21 +57,21 @@ def _make_repo(tmp_path, compose_body: str, name: str = "Fixture") -> str:
 def _deploy(client, repo_id, branch="main"):
     import json
 
-    r = client.post(f"/api/scm/repos/{repo_id}/deployments", json={"branch": branch})
+    r = client.post(f"/api/deployment/repos/{repo_id}/deployments", json={"branch": branch})
     assert r.status_code == 202, r.text
     deployment_id = r.json()["id"]
-    with client.stream("GET", f"/api/scm/deployments/{deployment_id}/logs") as s:
+    with client.stream("GET", f"/api/deployment/deployments/{deployment_id}/logs") as s:
         s.join_text_stream = None
         body = "".join(s.iter_text())
     events = [json.loads(l[5:]) for l in body.splitlines() if l.startswith("data:")]
-    detail = client.get(f"/api/scm/deployments/{deployment_id}").json()
+    detail = client.get(f"/api/deployment/deployments/{deployment_id}").json()
     return detail, events
 
 
 class TestRealDeploy:
     def test_deploy_brings_up_containers(self, client, tmp_path):
         repo = client.post(
-            "/api/scm/repos",
+            "/api/deployment/repos",
             json={"name": "Fixture", "url": _make_repo(tmp_path, COMPOSE_FIXTURE)},
         ).json()
 
@@ -84,12 +84,12 @@ class TestRealDeploy:
         assert containers[0]["state"] == "running"
         assert containers[0]["service"] == "web"
 
-        client.delete(f"/api/scm/repos/{repo['id']}?teardown=true")
+        client.delete(f"/api/deployment/repos/{repo['id']}?teardown=true")
 
     def test_failed_build_leaves_previous_container_running(self, client, tmp_path):
         """A broken compose must not disturb what is already deployed."""
         repo = client.post(
-            "/api/scm/repos",
+            "/api/deployment/repos",
             json={"name": "Fixture", "url": _make_repo(tmp_path, COMPOSE_FIXTURE)},
         ).json()
 
@@ -121,11 +121,11 @@ class TestRealDeploy:
         after = client.get(f"/api/containers?all=true&repoId={repo['id']}").json()
         assert after and after[0]["state"] == "running"
 
-        client.delete(f"/api/scm/repos/{repo['id']}?teardown=true")
+        client.delete(f"/api/deployment/repos/{repo['id']}?teardown=true")
 
     def test_network_attachment_survives_redeploy(self, client, tmp_path):
         repo = client.post(
-            "/api/scm/repos",
+            "/api/deployment/repos",
             json={"name": "Fixture", "url": _make_repo(tmp_path, COMPOSE_FIXTURE)},
         ).json()
         _deploy(client, repo["id"])
@@ -145,7 +145,7 @@ class TestRealDeploy:
         assert "attach-test-net" in after["networks"]
 
         client.delete(f"/api/networks/{network['id']}")
-        client.delete(f"/api/scm/repos/{repo['id']}?teardown=true")
+        client.delete(f"/api/deployment/repos/{repo['id']}?teardown=true")
 
     def test_builtin_network_delete_is_refused(self, client):
         r = client.delete("/api/networks/bridge")
@@ -164,7 +164,7 @@ class TestRealContainers:
             """
         )
         repo = client.post(
-            "/api/scm/repos",
+            "/api/deployment/repos",
             json={"name": "Logs", "url": _make_repo(tmp_path, compose, "Logs")},
         ).json()
         _deploy(client, repo["id"])
@@ -189,11 +189,11 @@ class TestRealContainers:
             for e in events
         )
 
-        client.delete(f"/api/scm/repos/{repo['id']}?teardown=true")
+        client.delete(f"/api/deployment/repos/{repo['id']}?teardown=true")
 
     def test_stop_and_start(self, client, tmp_path):
         repo = client.post(
-            "/api/scm/repos",
+            "/api/deployment/repos",
             json={"name": "Lifecycle", "url": _make_repo(tmp_path, COMPOSE_FIXTURE,
                                                           "Lifecycle")},
         ).json()
@@ -215,11 +215,11 @@ class TestRealContainers:
         assert client.post(f"/api/containers/{container['fullId']}/stop",
                            json={"timeout": 1}).status_code == 200
 
-        client.delete(f"/api/scm/repos/{repo['id']}?teardown=true")
+        client.delete(f"/api/deployment/repos/{repo['id']}?teardown=true")
 
     def test_log_download(self, client, tmp_path):
         repo = client.post(
-            "/api/scm/repos",
+            "/api/deployment/repos",
             json={"name": "Download", "url": _make_repo(tmp_path, COMPOSE_FIXTURE,
                                                          "Download")},
         ).json()
@@ -230,4 +230,4 @@ class TestRealContainers:
         assert r.status_code == 200
         assert "attachment" in r.headers.get("content-disposition", "")
 
-        client.delete(f"/api/scm/repos/{repo['id']}?teardown=true")
+        client.delete(f"/api/deployment/repos/{repo['id']}?teardown=true")

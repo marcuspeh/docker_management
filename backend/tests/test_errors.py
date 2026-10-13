@@ -77,7 +77,7 @@ class TestErrorResponses:
         assert r.json()["error"]["code"] == ErrorCode.NOT_FOUND
 
     def test_validation_error_names_the_field(self, client):
-        r = client.post("/api/scm/repos", json={"url": "file:///x"})
+        r = client.post("/api/deployment/repos", json={"url": "file:///x"})
         assert r.status_code == 400
         assert r.json()["error"]["code"] == ErrorCode.INVALID_NAME
         assert "field" in r.json()["error"]["detail"]
@@ -86,7 +86,7 @@ class TestErrorResponses:
 class TestStaticHosting:
     @pytest.fixture(autouse=True)
     def _dist(self, tmp_path, monkeypatch):
-        for app, marker in (("scm", "SCM"), ("containers", "CONTAINERS")):
+        for app, marker in (("deployment", "DEPLOYMENT"), ("containers", "CONTAINERS")):
             d = tmp_path / app
             (d / "assets").mkdir(parents=True)
             (d / "index.html").write_text(f"<html>{marker}</html>")
@@ -94,7 +94,9 @@ class TestStaticHosting:
 
         from app import config
 
-        monkeypatch.setattr(config.settings, "scm_dist_dir", tmp_path / "scm")
+        monkeypatch.setattr(
+            config.settings, "deployment_dist_dir", tmp_path / "deployment"
+        )
         monkeypatch.setattr(config.settings, "containers_dist_dir", tmp_path / "containers")
         self.tmp_path = tmp_path
 
@@ -106,20 +108,26 @@ class TestStaticHosting:
 
         return TestClient(create_app())
 
-    def test_root_redirects_to_scm(self):
+    def test_root_redirects_to_deployment(self):
         with self._client() as c:
             r = c.get("/", follow_redirects=False)
         assert r.status_code in (307, 302)
-        assert r.headers["location"] == "/scm/"
+        assert r.headers["location"] == "/deployment/"
 
-    @pytest.mark.parametrize("base,marker", [("/scm", "SCM"), ("/containers", "CONTAINERS")])
+    @pytest.mark.parametrize(
+        "base,marker",
+        [("/deployment", "DEPLOYMENT"), ("/containers", "CONTAINERS")],
+    )
     def test_each_app_served_at_its_base(self, base, marker):
         with self._client() as c:
             r = c.get(f"{base}/")
         assert r.status_code == 200
         assert marker in r.text
 
-    @pytest.mark.parametrize("base,marker", [("/scm", "SCM"), ("/containers", "CONTAINERS")])
+    @pytest.mark.parametrize(
+        "base,marker",
+        [("/deployment", "DEPLOYMENT"), ("/containers", "CONTAINERS")],
+    )
     def test_deep_link_falls_back_to_own_index(self, base, marker):
         """A client-side route must return that app's index, not the other's."""
         with self._client() as c:
@@ -129,19 +137,19 @@ class TestStaticHosting:
 
     def test_index_is_not_cached(self):
         with self._client() as c:
-            r = c.get("/scm/")
+            r = c.get("/deployment/")
         assert r.headers["cache-control"] == "no-cache"
 
     def test_hashed_assets_are_immutable(self):
         with self._client() as c:
-            r = c.get("/scm/assets/index-abc123.js")
+            r = c.get("/deployment/assets/index-abc123.js")
         assert r.status_code == 200
         assert "immutable" in r.headers["cache-control"]
 
     def test_apps_do_not_leak_into_each_other(self):
         with self._client() as c:
-            assert "CONTAINERS" not in c.get("/scm/anything").text
-            assert "SCM" not in c.get("/containers/anything").text
+            assert "CONTAINERS" not in c.get("/deployment/anything").text
+            assert "DEPLOYMENT" not in c.get("/containers/anything").text
 
     def test_missing_app_returns_404_envelope(self, tmp_path, monkeypatch):
         """Either app can be hosted elsewhere; the rest keeps working."""
@@ -158,5 +166,5 @@ class TestStaticHosting:
             assert r.status_code == 404
             assert r.json()["error"]["code"] == ErrorCode.NOT_FOUND
             # The other app and the API are unaffected.
-            assert c.get("/scm/").status_code == 200
+            assert c.get("/deployment/").status_code == 200
             assert c.get("/api/health").status_code == 200

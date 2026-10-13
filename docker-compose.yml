@@ -23,7 +23,7 @@ services:
       WORKSPACE_DIR: /srv/portal/repos
       DB_URL: sqlite:////srv/portal/portal.db
       # Left unset: both apps are served from this same origin.
-      # CORS_ORIGINS: https://scm.example.com
+      # CORS_ORIGINS: https://deployment.example.com
     labels:
       # Marks this container so the portal excludes and refuses to stop itself.
       portal.self: "true"

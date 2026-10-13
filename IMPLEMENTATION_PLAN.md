@@ -1,7 +1,7 @@
 # Docker Management Portal: Implementation Plan
 
 A self-hosted portal for a remote server, made of one backend and two separate web apps:
-- **SCM app** (`/scm/`): register Git repos and deploy a chosen branch. A deploy runs fetch, checkout, `docker compose build` and `docker compose up -d`, with live output and the commit hash recorded.
+- **Deployment app** (`/deployment/`): register Git repos and deploy a chosen branch. A deploy runs fetch, checkout, `docker compose build` and `docker compose up -d`, with live output and the commit hash recorded.
 - **Containers app** (`/containers/`): manage containers and Docker networks, and view live logs.
 - **Backend:** a FastAPI service that runs as a container on the server and controls the host's Docker daemon through the mounted socket.
 
@@ -30,23 +30,23 @@ The API contract lives in the backend document and is the interface all three pa
 ```mermaid
 flowchart LR
     subgraph web [Web apps]
-        ScmApp["SCM app /scm/"]
+        DeploymentApp["Deployment app /deployment/"]
         ContainersApp["Containers app /containers/"]
         Shared["@portal/shared (build-time)"]
     end
     subgraph fe [Frontend container]
-        Nginx["nginx: /scm/, /containers/"]
+        Nginx["nginx: /deployment/, /containers/"]
     end
     subgraph be [Backend container]
         Api["FastAPI /api"]
     end
     Daemon["Host Docker daemon"]
     Repos["Git remotes"]
-    Shared -.-> ScmApp
+    Shared -.-> DeploymentApp
     Shared -.-> ContainersApp
-    ScmApp -->|"/api/scm"| Api
+    DeploymentApp -->|"/api/deployment"| Api
     ContainersApp -->|"/api/containers, /api/networks"| Api
-    ScmApp --> Nginx
+    DeploymentApp --> Nginx
     ContainersApp --> Nginx
     Nginx -->|"proxies /api"| Api
     Api -->|"socket"| Daemon
@@ -56,8 +56,8 @@ flowchart LR
 ## Implementation checklist
 
 **Backend**
-- [x] Scaffold: FastAPI, settings, SQLModel/SQLite, error envelope, `/api/health`, static hosting for `/scm/` and `/containers/` with per-app SPA fallback
-- [x] SCM repos API: list/create (validated with `git ls-remote`)/get/patch/delete, branches, optional commits
+- [x] Scaffold: FastAPI, settings, SQLModel/SQLite, error envelope, `/api/health`, static hosting for `/deployment/` and `/containers/` with per-app SPA fallback
+- [x] Deployment repos API: list/create (validated with `git ls-remote`)/get/patch/delete, branches, optional commits
 - [x] Job runner: background deployments, sequence-numbered log buffer, step events, SSE replay from offset, cancel
 - [x] Deploy pipeline: clone-or-fetch, checkout, compose build, compose up -d, re-apply network attachments; stack actions
 - [x] Containers API: list with filters, stop/start/restart, logs SSE with stdout/stderr tagging, log download
@@ -68,8 +68,8 @@ flowchart LR
 - [x] npm workspace (`apps/*`, `packages/*`), base tsconfig, ESLint with a rule blocking imports between apps
 - [x] `@portal/shared`: config, API client + `ApiError`, contract types, `useEventSource`, format helpers, UI components, `AppHeader` + `HealthBadge`, Tailwind theme
 
-**Frontend: SCM app**
-- [x] Scaffold (Vite react-ts, base `/scm/`, port 5173, `/api` proxy, router, QueryClient)
+**Frontend: Deployment app**
+- [x] Scaffold (Vite react-ts, base `/deployment/`, port 5173, `/api` proxy, router, QueryClient)
 - [x] Repo list and Add Repository modal; repo detail with branch select, deploy, live output with resume, commit hash, history, link to the Containers app
 
 **Frontend: Containers app**
@@ -81,7 +81,7 @@ flowchart LR
 
 **Delivery**
 - [x] `backend/Dockerfile` (Python runtime plus the Docker CLI and compose plugin), `frontend/Dockerfile` (node build stage into nginx), `nginx.conf`, `docker-compose.yml` wiring both services, README
-- [ ] Manual end-to-end check covering every SCM and Containers interaction from the sample, with each app opened on its own (needs the frontend apps)
+- [ ] Manual end-to-end check covering every Deployment and Containers interaction from the sample, with each app opened on its own (needs the frontend apps)
 
 ## Out of scope for v1
 - Argos Logs and TCC Configs (pages and backends).

@@ -24,7 +24,7 @@ COPY app ./app
 RUN pip install --no-cache-dir .
 
 ENV PYTHONUNBUFFERED=1 \
-    SCM_DIST_DIR=/app/web/scm \
+    DEPLOYMENT_DIST_DIR=/app/web/deployment \
     CONTAINERS_DIST_DIR=/app/web/containers
 
 EXPOSE 8000

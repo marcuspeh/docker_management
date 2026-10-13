@@ -72,10 +72,10 @@ afterEach(() => {
 describe("useEventSource", () => {
   it("opens the stream and reports it open", () => {
     const { result } = renderHook(() =>
-      useEventSource("/api/scm/deployments/d1/logs", {}),
+      useEventSource("/api/deployment/deployments/d1/logs", {}),
     );
 
-    expect(FakeEventSource.latest.url).toBe("/api/scm/deployments/d1/logs");
+    expect(FakeEventSource.latest.url).toBe("/api/deployment/deployments/d1/logs");
 
     act(() => FakeEventSource.latest.open());
     expect(result.current.state).toBe("open");
@@ -85,7 +85,7 @@ describe("useEventSource", () => {
     let lastSeq = 0;
     renderHook(() =>
       useEventSource(
-        "/api/scm/deployments/d1/logs",
+        "/api/deployment/deployments/d1/logs",
         {
           line: (data) => {
             lastSeq = (data as { seq: number }).seq;
@@ -98,20 +98,20 @@ describe("useEventSource", () => {
     act(() => FakeEventSource.latest.open());
     act(() => FakeEventSource.latest.emit("line", { seq: 7, text: "$ build" }));
 
-    expect(FakeEventSource.latest.url).toBe("/api/scm/deployments/d1/logs?offset=0");
+    expect(FakeEventSource.latest.url).toBe("/api/deployment/deployments/d1/logs?offset=0");
 
     // The stream drops, so the hook reconnects from the last seq it saw.
     act(() => FakeEventSource.latest.error());
     act(() => vi.advanceTimersByTime(1000));
 
     expect(FakeEventSource.instances).toHaveLength(2);
-    expect(FakeEventSource.latest.url).toBe("/api/scm/deployments/d1/logs?offset=7");
+    expect(FakeEventSource.latest.url).toBe("/api/deployment/deployments/d1/logs?offset=7");
   });
 
   it("closes on a terminal event instead of retrying", () => {
     const onDone = vi.fn();
     const { result } = renderHook(() =>
-      useEventSource("/api/scm/deployments/d1/logs", { done: onDone }, { closeOn: ["done"] }),
+      useEventSource("/api/deployment/deployments/d1/logs", { done: onDone }, { closeOn: ["done"] }),
     );
 
     act(() => FakeEventSource.latest.open());
@@ -127,7 +127,7 @@ describe("useEventSource", () => {
   });
 
   it("gives up after five failed reconnects", () => {
-    const { result } = renderHook(() => useEventSource("/api/scm/deployments/d1/logs", {}));
+    const { result } = renderHook(() => useEventSource("/api/deployment/deployments/d1/logs", {}));
 
     for (let attempt = 0; attempt < 6; attempt += 1) {
       act(() => FakeEventSource.latest.error());
@@ -141,7 +141,7 @@ describe("useEventSource", () => {
 
   it("stays closed while disabled", () => {
     const { result } = renderHook(() =>
-      useEventSource("/api/scm/deployments/d1/logs", {}, { enabled: false }),
+      useEventSource("/api/deployment/deployments/d1/logs", {}, { enabled: false }),
     );
 
     expect(FakeEventSource.instances).toHaveLength(0);

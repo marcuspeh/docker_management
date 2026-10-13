@@ -1,7 +1,7 @@
 # Docker Management Portal: Frontend Tech Design
 
 The frontend is **two separate web apps**, each built with Vite, React and TypeScript:
-- **SCM app:** register repos and deploy a branch.
+- **Deployment app:** register repos and deploy a branch.
 - **Containers app:** manage containers and networks, and view logs.
 
 Each app has its own entry point, dev server, build and URL, and works as a page on its own. There is no host shell and no microfrontend runtime. Code both apps need lives in a shared workspace package that each app compiles in at build time.
@@ -9,7 +9,7 @@ Each app has its own entry point, dev server, build and URL, and works as a page
 The supplied prototype is a **sample**: it's a reference for screens, interactions and visual style only. All data comes from the backend described in [tech-design-backend.md](tech-design-backend.md), which owns the API contract.
 
 ## Scope
-- **SCM app:** the repo list, and a repo detail page with branch selection, deploy, live deployment output and deployment history.
+- **Deployment app:** the repo list, and a repo detail page with branch selection, deploy, live deployment output and deployment history.
 - **Containers app:** the networks sidebar, container cards with actions, and live logs.
 - **Shared package:** the API client, contract types, SSE hook, formatting helpers, UI components and theme.
 - **Out of scope:**
@@ -32,7 +32,7 @@ The supplied prototype is a **sample**: it's a reference for screens, interactio
 All packages are installed at their latest stable versions when scaffolded.
 
 ## Reference behavior from the sample
-**SCM**
+**Deployment**
 - A repo list with name, Git URL and path. An "Add Repository" modal takes name, Git URL and path, with the path defaulting to `/`.
 - A repo detail page with a "Target Branch" select and a "Deploy Docker Image" button. While a deploy runs the button reads "Deploying Image...".
 - A dark "Deployment Output" terminal shows the commands and their output, then success or failure.
@@ -48,7 +48,7 @@ All packages are installed at their latest stable versions when scaffolded.
 - **No tab bar.** The sample's shared header with tabs is replaced by a header in each app showing the product name, the app's title, a health badge and a link to the other app.
 - The Add Repository path field is labelled "Compose file location" instead of "Dockerfile location". There's also an optional compose file name, defaulting to `docker-compose.yml`.
 - The Deployment Output shows the real compose commands from the backend, not `docker build` and `docker run`.
-- A repo's detail page uses its own route (`/scm/:repoId`) instead of `?repoId=`.
+- A repo's detail page uses its own route (`/deployment/:repoId`) instead of `?repoId=`.
 - The deploy state comes from the backend instead of `?building=true`, so it survives a page reload.
 - The repo detail page shows the deployed commit hash and a deployment history.
 - Container cards add Start and Restart for stopped containers.
@@ -62,16 +62,16 @@ frontend/
   tsconfig.base.json
   eslint.config.js
   apps/
-    scm/
+    deployment/
       index.html
-      package.json           # name: @portal/scm-app; depends on @portal/shared
-      vite.config.ts         # base "/scm/", port 5173, proxy /api
+      package.json           # name: @portal/deployment-app; depends on @portal/shared
+      vite.config.ts         # base "/deployment/", port 5173, proxy /api
       src/
         main.tsx             # QueryClientProvider + RouterProvider + theme import
         router.tsx
         pages/RepoListPage.tsx  pages/RepoDetailPage.tsx
         components/          # RepoCard, AddRepoModal, BranchSelect, DeployPanel, DeploymentOutput, DeploymentHistory
-        queries.ts           # SCM query hooks + mutations
+        queries.ts           # Deployment query hooks + mutations
     containers/
       index.html
       package.json           # name: @portal/containers-app; depends on @portal/shared
@@ -92,7 +92,7 @@ frontend/
         sse/useEventSource.ts
         ui/                  # Button, Input, Select, Modal, Badge, Terminal, EmptyState, ErrorBanner, AppHeader, HealthBadge
         lib/format.ts  lib/cn.ts
-        config.ts            # reads VITE_API_BASE_URL, VITE_SCM_URL, VITE_CONTAINERS_URL
+        config.ts            # reads VITE_API_BASE_URL, VITE_DEPLOYMENT_URL, VITE_CONTAINERS_URL
         theme.css            # @import "tailwindcss"; @theme tokens; @source for shared components
 ```
 
@@ -103,26 +103,26 @@ frontend/
 ## Configuration
 Each app reads build-time environment variables through `packages/shared/src/config.ts`:
 - `VITE_API_BASE_URL`: the API's address. The default is empty, meaning same-origin `/api`.
-- `VITE_SCM_URL`: where the header's "SCM" link goes. The default is `/scm/`.
-- `VITE_CONTAINERS_URL`: where the header's "Containers" link and the SCM app's "View containers" link go. The default is `/containers/`.
+- `VITE_DEPLOYMENT_URL`: where the header's "Deployment" link goes. The default is `/deployment/`.
+- `VITE_CONTAINERS_URL`: where the header's "Containers" link and the Deployment app's "View containers" link go. The default is `/containers/`.
 
-By default all three apps (API, SCM, Containers) share one origin, so no CORS is needed. To host an app elsewhere, set `VITE_API_BASE_URL` at build time and set `CORS_ORIGINS` on the backend.
+By default all three apps (API, Deployment, Containers) share one origin, so no CORS is needed. To host an app elsewhere, set `VITE_API_BASE_URL` at build time and set `CORS_ORIGINS` on the backend.
 
-## SCM app
+## Deployment app
 
-### Routes (base path `/scm/`)
-- `/scm/`: the repo list. `?modal=add-repo` opens the Add Repository modal.
-- `/scm/:repoId`: the repo detail page. `?branch=` holds the selected branch.
-- Any other path redirects to `/scm/`.
+### Routes (base path `/deployment/`)
+- `/deployment/`: the repo list. `?modal=add-repo` opens the Add Repository modal.
+- `/deployment/:repoId`: the repo detail page. `?branch=` holds the selected branch.
+- Any other path redirects to `/deployment/`.
 
 ### Pages and the endpoints they use
 **Header**
-- `AppHeader` shows the title "SCM", the `HealthBadge`, and a link to the Containers app.
+- `AppHeader` shows the title "Deployment", the `HealthBadge`, and a link to the Containers app.
 - `HealthBadge` calls `GET /api/health` every 30 seconds. It shows "System Online" (green) when `ok`, "Degraded" (amber) when `degraded`, and "Offline" (red) when the request fails.
 
 **RepoListPage**
-- Loads `GET /api/scm/repos`. Each `RepoCard` shows name, URL, path and the last deployment (branch, short SHA and status).
-- `AddRepoModal` calls `POST /api/scm/repos`. Errors are shown in place:
+- Loads `GET /api/deployment/repos`. Each `RepoCard` shows name, URL, path and the last deployment (branch, short SHA and status).
+- `AddRepoModal` calls `POST /api/deployment/repos`. Errors are shown in place:
   - `REPO_UNREACHABLE` shows Git's error output under the URL field.
   - `NAME_TAKEN` and `INVALID_NAME` show under the name field.
   - `INVALID_PATH` shows under the path field.
@@ -130,18 +130,18 @@ By default all three apps (API, SCM, Containers) share one origin, so no CORS is
 - The empty state prompts the user to add the first repository.
 
 **RepoDetailPage**
-- Loads `GET /api/scm/repos/{id}` for the header (name, URL, path, last deployed commit).
-- `BranchSelect` loads `GET /api/scm/repos/{id}/branches`, with the default branch preselected.
+- Loads `GET /api/deployment/repos/{id}` for the header (name, URL, path, last deployed commit).
+- `BranchSelect` loads `GET /api/deployment/repos/{id}/branches`, with the default branch preselected.
 - `DeployPanel`:
-  - The Deploy button calls `POST /api/scm/repos/{id}/deployments`.
+  - The Deploy button calls `POST /api/deployment/repos/{id}/deployments`.
   - If the response is 409 `DEPLOY_IN_PROGRESS`, the panel attaches to `detail.deploymentId` instead of showing an error.
   - The button is disabled and reads "Deploying Image..." while the deployment is `queued` or `running`.
-- `DeploymentOutput` subscribes to `GET /api/scm/deployments/{did}/logs`:
+- `DeploymentOutput` subscribes to `GET /api/deployment/deployments/{did}/logs`:
   - `$ ` lines are shown in blue. A `step` event shows a step header with its status.
   - `done` shows a green success line (with the short commit hash) or a red failure line (with the error and the step that failed).
   - The output auto-scrolls unless the user has scrolled up.
   - After a successful deploy, a "View containers" link opens the Containers app filtered to this repo (`{VITE_CONTAINERS_URL}?repoId=<id>`).
-- `DeploymentHistory` loads `GET /api/scm/repos/{id}/deployments?limit=20`. It shows branch, short SHA, commit message, status and duration. Clicking a row replays that deployment's output.
+- `DeploymentHistory` loads `GET /api/deployment/repos/{id}/deployments?limit=20`. It shows branch, short SHA, commit message, status and duration. Clicking a row replays that deployment's output.
 - On load, if the newest deployment is `running`, the page attaches to its stream automatically.
 
 ### Query keys and invalidation
@@ -153,13 +153,13 @@ By default all three apps (API, SCM, Containers) share one origin, so no CORS is
 
 ### Routes (base path `/containers/`)
 - `/containers/`: the containers page.
-  - `?network=` filters by network. `?repoId=` filters to one repo's containers, for the SCM app's link. `?expandedLogId=` opens a container's log panel.
+  - `?network=` filters by network. `?repoId=` filters to one repo's containers, for the Deployment app's link. `?expandedLogId=` opens a container's log panel.
   - `?modal=create-network`, `?modal=connect&targetNetwork=` and `?modal=delete-network&targetNetwork=` open the network modals.
 - Any other path redirects to `/containers/`.
 
 ### Page and the endpoints it uses
 **Header**
-- `AppHeader` shows the title "Containers", the `HealthBadge`, and a link to the SCM app.
+- `AppHeader` shows the title "Containers", the `HealthBadge`, and a link to the Deployment app.
 
 **ContainersPage**
 - `NetworkSidebar` loads `GET /api/networks`. Built-in and compose-owned networks show a lock icon and have no Delete action.
@@ -211,18 +211,18 @@ By default all three apps (API, SCM, Containers) share one origin, so no CORS is
 ## Dev workflow and build
 - `npm install` at `frontend/` installs everything for both apps and the shared package.
 - **Dev servers:**
-  - `npm run dev:scm` starts the SCM app on port 5173.
+  - `npm run dev:deployment` starts the Deployment app on port 5173.
   - `npm run dev:containers` starts the Containers app on port 5174.
   - `npm run dev` starts both.
   - Each dev server proxies `/api`, including SSE, to uvicorn on `http://localhost:8000`.
 - **Builds:**
-  - `npm run build -w @portal/scm-app` writes `apps/scm/dist`.
+  - `npm run build -w @portal/deployment-app` writes `apps/deployment/dist`.
   - `npm run build -w @portal/containers-app` writes `apps/containers/dist`.
   - `npm run build` builds both. Each build runs a type check with `tsc -b` first.
 - `npm run lint` and `npm run test` run across all workspaces.
 
 ## Deployment
-- **Default:** the backend serves each app's `dist` under its base path, `/scm/` and `/containers/`. `/` redirects to `/scm/`. See the backend document's static hosting section.
+- **Default:** the backend serves each app's `dist` under its base path, `/deployment/` and `/containers/`. `/` redirects to `/deployment/`. See the backend document's static hosting section.
 - **Separate hosting:** either app's `dist` can be put on any static host with an `index.html` fallback for its base path. Rebuild it with `VITE_API_BASE_URL` (and, if needed, the other app's URL) set, and add its origin to the backend's `CORS_ORIGINS`.
 
 ## Verification
@@ -234,5 +234,5 @@ By default all three apps (API, SCM, Containers) share one origin, so no CORS is
   - Build and serve each app alone and confirm it works.
   - Confirm neither app's bundle imports from the other app (an ESLint `no-restricted-imports` rule enforces this).
 - **Manual end-to-end** against a running backend:
-  - **SCM:** add a repo, select a branch and deploy. Reload during the deploy and check the output picks up again. Check the commit hash appears and the history updates. Open `/scm/<id>` directly. Follow "View containers".
+  - **Deployment:** add a repo, select a branch and deploy. Reload during the deploy and check the output picks up again. Check the commit hash appears and the history updates. Open `/deployment/<id>` directly. Follow "View containers".
   - **Containers:** filter by network and by repo, search, view logs, stop, start and restart. Create a network, connect containers to it, then delete it.

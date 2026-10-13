@@ -1,16 +1,16 @@
 # Docker Management Portal: Backend Tech Design
 
-This is the FastAPI service behind the portal's SCM and Containers pages. It runs as a container on the remote server and controls the host's Docker daemon through the mounted socket. This document owns the **API contract** that the frontend builds against. The frontend design is in [tech-design-frontend.md](tech-design-frontend.md).
+This is the FastAPI service behind the portal's Deployment and Containers pages. It runs as a container on the remote server and controls the host's Docker daemon through the mounted socket. This document owns the **API contract** that the frontend builds against. The frontend design is in [tech-design-frontend.md](tech-design-frontend.md).
 
 ## Scope
-- **SCM:**
+- **Deployment:**
   - Register repos (name, Git URL, path) and list their branches.
   - Deploy a branch: fetch, checkout, `docker compose build`, then `docker compose up -d`. Stream the output and record the commit hash.
 - **Containers:**
   - List containers and stop, start or restart them. Stream their logs.
 - **Networks:**
   - List, create and delete networks. Connect containers to networks and disconnect them.
-- **Static hosting:** serve the production builds of the two frontend apps (SCM and Containers), each under its own path.
+- **Static hosting:** serve the production builds of the two frontend apps (Deployment and Containers), each under its own path.
 - **Out of scope:** Argos Logs and TCC Configs backends, container metrics, auth, keeping old image versions, registry push, webhooks, multiple hosts.
 
 ## Decisions
@@ -27,14 +27,14 @@ This is the FastAPI service behind the portal's SCM and Containers pages. It run
 
 ```mermaid
 flowchart TB
-    ScmApp["SCM web app"]
+    DeploymentApp["Deployment web app"]
     ContainersApp["Containers web app"]
     subgraph host [Remote Server]
         Daemon["Host Docker daemon"]
         Sock["/var/run/docker.sock"]
         HostDir["/srv/portal (clones, sqlite)"]
         subgraph portal [Portal container]
-            Static["Static files: /scm/ and /containers/"]
+            Static["Static files: /deployment/ and /containers/"]
             Api["FastAPI /api"]
             GitSvc["git_service"]
             ComposeSvc["compose_service"]
@@ -44,9 +44,9 @@ flowchart TB
         end
         Apps["Deployed compose projects"]
     end
-    ScmApp -->|"GET /scm/"| Static
+    DeploymentApp -->|"GET /deployment/"| Static
     ContainersApp -->|"GET /containers/"| Static
-    ScmApp -->|"REST + SSE /api/scm"| Api
+    DeploymentApp -->|"REST + SSE /api/deployment"| Api
     ContainersApp -->|"REST + SSE /api/containers, /api/networks"| Api
     Api --> Jobs
     Jobs --> GitSvc
@@ -64,13 +64,13 @@ flowchart TB
 
 ```mermaid
 sequenceDiagram
-    participant UI as SCM app
+    participant UI as Deployment app
     participant API
     participant Git
     participant Compose
-    UI->>API: POST /api/scm/repos/id/deployments (branch)
+    UI->>API: POST /api/deployment/repos/id/deployments (branch)
     API-->>UI: 202 Deployment (queued)
-    UI->>API: GET /api/scm/deployments/did/logs (SSE)
+    UI->>API: GET /api/deployment/deployments/did/logs (SSE)
     API->>Git: clone (first time) or fetch --prune
     API->>Git: checkout -f -B branch origin/branch
     API->>Git: rev-parse HEAD (commit hash)
@@ -147,31 +147,31 @@ type LogLine = { time: string; stream: "stdout" | "stderr"; msg: string };
 ### System
 - `GET /api/health` returns `{ status: "ok" | "degraded", docker: { reachable, serverVersion }, git: { version } }`.
 
-### SCM: repositories
-- `GET /api/scm/repos` returns `Repo[]`.
-- `POST /api/scm/repos` with `{ name, url, path?, composeFile? }` returns `201 Repo`.
+### Deployment: repositories
+- `GET /api/deployment/repos` returns `Repo[]`.
+- `POST /api/deployment/repos` with `{ name, url, path?, composeFile? }` returns `201 Repo`.
   - It runs `git ls-remote --symref <url>` with a 20-second timeout to check access and find the default branch. Nothing is cloned until the first deploy.
   - Errors: `INVALID_NAME`, `INVALID_PATH`, `REPO_UNREACHABLE`, `NAME_TAKEN`.
-- `GET /api/scm/repos/{repoId}` returns `Repo`.
-- `PATCH /api/scm/repos/{repoId}` with `{ name?, path?, composeFile? }` returns `Repo`. The URL can't be changed.
-- `DELETE /api/scm/repos/{repoId}?teardown=true` returns 204. It runs `compose down` when `teardown` is set, then deletes the clone and the repo's records.
-- `GET /api/scm/repos/{repoId}/branches` returns `{ defaultBranch, branches: Branch[] }`. It reads `git ls-remote --heads`, so it works before the first clone.
-- `GET /api/scm/repos/{repoId}/commits?branch=develop&limit=20` returns `Commit[]`. Optional. Returns `NOT_CLONED` before the first deploy.
+- `GET /api/deployment/repos/{repoId}` returns `Repo`.
+- `PATCH /api/deployment/repos/{repoId}` with `{ name?, path?, composeFile? }` returns `Repo`. The URL can't be changed.
+- `DELETE /api/deployment/repos/{repoId}?teardown=true` returns 204. It runs `compose down` when `teardown` is set, then deletes the clone and the repo's records.
+- `GET /api/deployment/repos/{repoId}/branches` returns `{ defaultBranch, branches: Branch[] }`. It reads `git ls-remote --heads`, so it works before the first clone.
+- `GET /api/deployment/repos/{repoId}/commits?branch=develop&limit=20` returns `Commit[]`. Optional. Returns `NOT_CLONED` before the first deploy.
 
-### SCM: deployments
-- `POST /api/scm/repos/{repoId}/deployments` with `{ branch, commit? }` returns `202 Deployment`.
+### Deployment: deployments
+- `POST /api/deployment/repos/{repoId}/deployments` with `{ branch, commit? }` returns `202 Deployment`.
   - Returns `DEPLOY_IN_PROGRESS` if a deploy is already running for this repo.
-- `GET /api/scm/repos/{repoId}/deployments?limit=20` returns `Deployment[]`, newest first.
-- `GET /api/scm/deployments/{deploymentId}` returns `Deployment & { containers: Container[] }`.
-- `GET /api/scm/deployments/{deploymentId}/logs?offset=0` is an SSE stream. Events:
+- `GET /api/deployment/repos/{repoId}/deployments?limit=20` returns `Deployment[]`, newest first.
+- `GET /api/deployment/deployments/{deploymentId}` returns `Deployment & { containers: Container[] }`.
+- `GET /api/deployment/deployments/{deploymentId}/logs?offset=0` is an SSE stream. Events:
   - `step`: `{ step, status: "started" | "succeeded" | "failed" }`
   - `line`: `{ seq, text }`. Each command is sent as a `$ <command>` line before its output.
   - `done`: `{ status, commitSha, commitMessage, error }`, after which the stream closes.
   - The stream replays every line from `offset` onward. A finished deployment replays its saved log, then sends `done`.
-- `POST /api/scm/deployments/{deploymentId}/cancel` returns `Deployment`. Optional. It kills the running command. If cancelled before `up`, the previous containers keep running.
+- `POST /api/deployment/deployments/{deploymentId}/cancel` returns `Deployment`. Optional. It kills the running command. If cancelled before `up`, the previous containers keep running.
 
-### SCM: stack actions
-- `POST /api/scm/repos/{repoId}/stack/{action}`, where `action` is `up`, `stop`, `restart` or `down`, returns `{ containers: Container[] }`.
+### Deployment: stack actions
+- `POST /api/deployment/repos/{repoId}/stack/{action}`, where `action` is `up`, `stop`, `restart` or `down`, returns `{ containers: Container[] }`.
   - `up` runs `compose up -d` with no rebuild and then re-applies network attachments.
 
 ### Containers
@@ -208,7 +208,7 @@ Containers and networks themselves aren't stored. They're read live from Docker.
 backend/
   app/
     main.py              # app factory, /api router, static mounts for both apps + SPA fallback, startup tasks
-    config.py            # WORKSPACE_DIR, DB_URL, CORS_ORIGINS, SCM_DIST_DIR, CONTAINERS_DIST_DIR, timeouts
+    config.py            # WORKSPACE_DIR, DB_URL, CORS_ORIGINS, DEPLOYMENT_DIST_DIR, CONTAINERS_DIST_DIR, timeouts
     db.py  models.py     # SQLModel engine + tables
     schemas.py           # request/response models (camelCase aliases)
     errors.py            # ApiError + exception handlers -> error envelope
@@ -218,15 +218,15 @@ backend/
       docker_service.py  # containers, logs, networks
       jobs.py            # deployment runner, seq log buffer, SSE fan-out, cancel
     routers/
-      health.py  scm.py  containers.py  networks.py
+      health.py  deployment.py  containers.py  networks.py
   tests/
   pyproject.toml         # fastapi, uvicorn[standard], sqlmodel, docker, sse-starlette, pydantic-settings; dev: pytest, httpx
 ```
 
 ### Static hosting of the two web apps
-- `/scm/*` serves the SCM app's `dist` (`SCM_DIST_DIR`). `/containers/*` serves the Containers app's `dist` (`CONTAINERS_DIST_DIR`).
-- Within each base path, a request that doesn't match a file returns that app's own `index.html`. This makes client-side deep links such as `/scm/123` work.
-- `/` redirects to `/scm/`.
+- `/deployment/*` serves the Deployment app's `dist` (`DEPLOYMENT_DIST_DIR`). `/containers/*` serves the Containers app's `dist` (`CONTAINERS_DIST_DIR`).
+- Within each base path, a request that doesn't match a file returns that app's own `index.html`. This makes client-side deep links such as `/deployment/123` work.
+- `/` redirects to `/deployment/`.
 - If an app's directory is missing, its path returns 404 and the rest of the service keeps working. Either app can therefore be deployed elsewhere and left out of this image.
 - Hashed assets (`/assets/*`) get `Cache-Control: public, max-age=31536000, immutable`. Each `index.html` gets `no-cache`.
 
@@ -267,8 +267,8 @@ services:
 ```
 
 - The image is built in stages:
-  - Stage 1 (`node:lts-slim`) runs `npm ci` and `npm run build` in `frontend/`, producing `apps/scm/dist` and `apps/containers/dist`.
-  - Stage 2 (`python:3.12-slim`) adds `git` and `openssh-client`, plus the Docker CLI and compose plugin copied from `docker:cli`. It installs the backend and copies both `dist` folders to `/app/web/scm` and `/app/web/containers`.
+  - Stage 1 (`node:lts-slim`) runs `npm ci` and `npm run build` in `frontend/`, producing `apps/deployment/dist` and `apps/containers/dist`.
+  - Stage 2 (`python:3.12-slim`) adds `git` and `openssh-client`, plus the Docker CLI and compose plugin copied from `docker:cli`. It installs the backend and copies both `dist` folders to `/app/web/deployment` and `/app/web/containers`.
 - The workspace is mounted at the same path inside and outside the container, so relative bind mounts in compose files resolve correctly on the host.
 - The process runs as root for socket access, or as a non-root user with `group_add` set to the host's docker group ID.
 - The README covers Git credentials and `known_hosts`, the same-path mount requirement, and the warning that Docker socket access equals root on the host while there's no auth.

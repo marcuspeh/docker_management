@@ -19,7 +19,7 @@ import os  # noqa: E402
 
 os.environ.setdefault("WORKSPACE_DIR", str(_TMP / "repos"))
 os.environ.setdefault("DB_URL", f"sqlite:///{_TMP / 'test.db'}")
-os.environ.setdefault("SCM_DIST_DIR", str(_TMP / "scm"))
+os.environ.setdefault("DEPLOYMENT_DIST_DIR", str(_TMP / "deployment"))
 os.environ.setdefault("CONTAINERS_DIST_DIR", str(_TMP / "containers"))
 
 

@@ -4,7 +4,7 @@ import {
   Button,
   EmptyState,
   ErrorBanner,
-  ScmHeader,
+  DeploymentHeader,
   Skeleton,
   toApiError,
 } from "@portal/shared";
@@ -12,7 +12,7 @@ import { useRepos } from "../queries";
 import { RepoCard } from "../components/RepoCard";
 import { AddRepoModal } from "../components/AddRepoModal";
 
-/** The repo list at `/scm/`. `?modal=add-repo` opens the Add Repository modal. */
+/** The repo list at `/deployment/`. `?modal=add-repo` opens the Add Repository modal. */
 export function RepoListPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const { data, isPending, isError, error, refetch } = useRepos();
@@ -25,12 +25,12 @@ export function RepoListPage() {
 
   return (
     <div className="min-h-screen">
-      <ScmHeader>
+      <DeploymentHeader>
         <Button size="sm" onClick={() => setSearchParams({ modal: "add-repo" })}>
           <Plus className="size-4" aria-hidden />
           Add Repository
         </Button>
-      </ScmHeader>
+      </DeploymentHeader>
 
       <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6">
         <div className="mb-4 flex items-center justify-between">

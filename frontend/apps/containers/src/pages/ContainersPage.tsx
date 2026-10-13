@@ -137,7 +137,7 @@ export function ContainersPage() {
               description={
                 search
                   ? "Nothing matches that search."
-                  : "Deploy a repository from the SCM app, or clear the filters."
+                  : "Deploy a repository from the Deployment app, or clear the filters."
               }
             />
           ) : (

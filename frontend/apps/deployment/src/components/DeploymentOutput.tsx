@@ -115,7 +115,7 @@ export function DeploymentOutput({
   );
 
   const { state, failed, reconnect } = useEventSource(
-    deploymentId ? apiUrl(`/api/scm/deployments/${deploymentId}/logs`) : "",
+    deploymentId ? apiUrl(`/api/deployment/deployments/${deploymentId}/logs`) : "",
     handlers,
     {
       enabled: Boolean(deploymentId),

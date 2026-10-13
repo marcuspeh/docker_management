@@ -29,7 +29,7 @@ export default tseslint.config(
   {
     // Neither app may import from the other: each one has to build, run and
     // deploy on its own.
-    files: ["apps/scm/**/*.{ts,tsx}"],
+    files: ["apps/deployment/**/*.{ts,tsx}"],
     rules: {
       "no-restricted-imports": [
         "error",
@@ -38,12 +38,12 @@ export default tseslint.config(
             {
               group: ["@portal/containers-app", "@portal/containers-app/*"],
               message:
-                "The SCM app must not import from the Containers app. Move shared code into @portal/shared.",
+                "The Deployment app must not import from the Containers app. Move shared code into @portal/shared.",
             },
             {
               group: ["../../containers/*", "../containers/*"],
               message:
-                "The SCM app must not import from the Containers app. Move shared code into @portal/shared.",
+                "The Deployment app must not import from the Containers app. Move shared code into @portal/shared.",
             },
           ],
         },
@@ -58,14 +58,14 @@ export default tseslint.config(
         {
           patterns: [
             {
-              group: ["@portal/scm-app", "@portal/scm-app/*"],
+              group: ["@portal/deployment-app", "@portal/deployment-app/*"],
               message:
-                "The Containers app must not import from the SCM app. Move shared code into @portal/shared.",
+                "The Containers app must not import from the Deployment app. Move shared code into @portal/shared.",
             },
             {
-              group: ["../../scm/*", "../scm/*"],
+              group: ["../../deployment/*", "../deployment/*"],
               message:
-                "The Containers app must not import from the SCM app. Move shared code into @portal/shared.",
+                "The Containers app must not import from the Deployment app. Move shared code into @portal/shared.",
             },
           ],
         },

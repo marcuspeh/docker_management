@@ -8,7 +8,7 @@
  */
 export const config = {
   apiBaseUrl: import.meta.env.VITE_API_BASE_URL ?? "",
-  scmUrl: import.meta.env.VITE_SCM_URL ?? "/scm/",
+  deploymentUrl: import.meta.env.VITE_DEPLOYMENT_URL ?? "/deployment/",
   containersUrl: import.meta.env.VITE_CONTAINERS_URL ?? "/containers/",
 } as const;
 

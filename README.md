@@ -3,7 +3,7 @@
 A self-hosted portal for a remote server, made of one backend and two separate
 web apps:
 
-- **SCM app** (`/scm/`) — register Git repositories and deploy a chosen branch.
+- **Deployment app** (`/deployment/`) — register Git repositories and deploy a chosen branch.
   A deploy fetches, checks out, runs `docker compose build` then
   `docker compose up -d`, streaming live output and recording the commit hash.
 - **Containers app** (`/containers/`) — manage containers and Docker networks,
@@ -24,7 +24,7 @@ it anywhere else.
 ## How it fits together
 
 ```
-nginx  ->  /scm/        SCM app
+nginx  ->  /deployment/        Deployment app
           /containers/  Containers app
           /api/*        FastAPI backend
                           |
@@ -51,7 +51,7 @@ mkdir -p /srv/portal
 docker compose up -d --build
 ```
 
-Then open <http://127.0.0.1:8000/scm/>.
+Then open <http://127.0.0.1:8000/deployment/>.
 
 The workspace must be mounted at the **same path inside and outside** the
 container (`/srv/portal:/srv/portal`). Compose files in your repositories often
@@ -79,7 +79,7 @@ All settings are environment variables read by `backend/app/config.py`.
 | `WORKSPACE_DIR` | `/srv/portal/repos` | Where repository clones live |
 | `DB_URL` | `sqlite:////srv/portal/portal.db` | SQLite location |
 | `CORS_ORIGINS` | empty | Only needed if an app is hosted on another origin |
-| `SCM_DIST_DIR` | `/app/web/scm` | SCM app build output |
+| `DEPLOYMENT_DIST_DIR` | `/app/web/deployment` | Deployment app build output |
 | `CONTAINERS_DIST_DIR` | `/app/web/containers` | Containers app build output |
 | `GIT_TIMEOUT_SECONDS` | `20` | Timeout for `git ls-remote` |
 | `COMPOSE_TIMEOUT_SECONDS` | `3600` | Timeout for one compose command |
@@ -155,7 +155,7 @@ backend/
       deploy.py          the deploy pipeline and stack actions
       jobs.py            log buffering, SSE fan-out, cancellation
     routers/
-      health.py  scm.py  containers.py  networks.py
+      health.py  deployment.py  containers.py  networks.py
   tests/
 frontend/                the two Vite apps and their shared package
 docs/                    backend and frontend tech design

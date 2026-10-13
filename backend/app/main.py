@@ -20,7 +20,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from .config import settings
 from .db import init_db, session_scope
 from .errors import ErrorCode, register_error_handlers
-from .routers import containers, health, networks, scm
+from .routers import containers, deployment, health, networks
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -60,10 +60,10 @@ async def recover_interrupted_deployments() -> None:
 class SPAStaticFiles(StaticFiles):
     """Static files with a per-app SPA fallback and correct cache headers.
 
-    Plain StaticFiles answers 404 for a client-side route such as ``/scm/123``,
-    which would break deep links and refreshes. Anything that does not match a
-    file falls back to this app's own index.html instead, so each app resolves
-    its own routes rather than leaking into the other one.
+    Plain StaticFiles answers 404 for a client-side route such as
+    ``/deployment/123``, which would break deep links and refreshes. Anything
+    that does not match a file falls back to this app's own index.html instead,
+    so each app resolves its own routes rather than leaking into the other one.
     """
 
     async def get_response(self, path: str, scope) -> Response:
@@ -113,7 +113,7 @@ def create_app() -> FastAPI:
     register_error_handlers(app)
 
     app.include_router(health.router, prefix="/api")
-    app.include_router(scm.router, prefix="/api/scm")
+    app.include_router(deployment.router, prefix="/api/deployment")
     app.include_router(containers.router, prefix="/api/containers")
     app.include_router(networks.router, prefix="/api/networks")
 
@@ -131,13 +131,13 @@ def _mount_static_apps(app: FastAPI) -> None:
     from fastapi.responses import RedirectResponse
 
     apps = (
-        ("/scm", settings.scm_dist_dir),
+        ("/deployment", settings.deployment_dist_dir),
         ("/containers", settings.containers_dist_dir),
     )
 
     @app.get("/", include_in_schema=False)
     async def _root() -> RedirectResponse:
-        return RedirectResponse(url="/scm/")
+        return RedirectResponse(url="/deployment/")
 
     for base_path, dist_dir in apps:
         if dist_dir.is_dir():

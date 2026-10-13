@@ -4,8 +4,8 @@ import tailwindcss from "@tailwindcss/vite";
 import { fileURLToPath } from "node:url";
 
 export default defineConfig({
-  // Served under /scm/ in production, both by nginx and by the backend.
-  base: "/scm/",
+  // Served under /deployment/ in production, both by nginx and by the backend.
+  base: "/deployment/",
   plugins: [react(), tailwindcss()],
   resolve: {
     // Order matters: the exact theme.css entry has to win over the package

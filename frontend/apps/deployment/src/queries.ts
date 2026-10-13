@@ -19,14 +19,14 @@ export const repoKeys = {
 export function useRepos() {
   return useQuery({
     queryKey: repoKeys.all,
-    queryFn: () => api.get<Repo[]>("/api/scm/repos"),
+    queryFn: () => api.get<Repo[]>("/api/deployment/repos"),
   });
 }
 
 export function useRepo(id: string | undefined) {
   return useQuery({
     queryKey: repoKeys.detail(id ?? ""),
-    queryFn: () => api.get<Repo>(`/api/scm/repos/${id}`),
+    queryFn: () => api.get<Repo>(`/api/deployment/repos/${id}`),
     enabled: Boolean(id),
   });
 }
@@ -34,7 +34,7 @@ export function useRepo(id: string | undefined) {
 export function useBranches(id: string | undefined) {
   return useQuery({
     queryKey: repoKeys.branches(id ?? ""),
-    queryFn: () => api.get<BranchList>(`/api/scm/repos/${id}/branches`),
+    queryFn: () => api.get<BranchList>(`/api/deployment/repos/${id}/branches`),
     enabled: Boolean(id),
     // Branches change only when someone pushes.
     staleTime: 60_000,
@@ -45,7 +45,7 @@ export function useDeployments(id: string | undefined, limit = 20) {
   return useQuery({
     queryKey: [...repoKeys.deployments(id ?? ""), limit],
     queryFn: () =>
-      api.get<Deployment[]>(`/api/scm/repos/${id}/deployments`, { query: { limit } }),
+      api.get<Deployment[]>(`/api/deployment/repos/${id}/deployments`, { query: { limit } }),
     enabled: Boolean(id),
   });
 }
@@ -53,7 +53,7 @@ export function useDeployments(id: string | undefined, limit = 20) {
 export function useCreateRepo() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (body: CreateRepoBody) => api.post<Repo>("/api/scm/repos", body),
+    mutationFn: (body: CreateRepoBody) => api.post<Repo>("/api/deployment/repos", body),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: repoKeys.all }),
   });
 }
@@ -62,7 +62,7 @@ export function useStartDeployment(repoId: string) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (body: StartDeploymentBody) =>
-      api.post<Deployment>(`/api/scm/repos/${repoId}/deployments`, body),
+      api.post<Deployment>(`/api/deployment/repos/${repoId}/deployments`, body),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: repoKeys.detail(repoId) });
       queryClient.invalidateQueries({ queryKey: repoKeys.all });

@@ -5,7 +5,7 @@ import { ArrowLeft, ExternalLink } from "lucide-react";
 import {
   config,
   ErrorBanner,
-  ScmHeader,
+  DeploymentHeader,
   shortSha,
   Skeleton,
   toApiError,
@@ -15,7 +15,7 @@ import { DeployPanel } from "../components/DeployPanel";
 import { DeploymentHistory } from "../components/DeploymentHistory";
 import { DeploymentOutput } from "../components/DeploymentOutput";
 
-/** The repo detail page at `/scm/:repoId`. */
+/** The repo detail page at `/deployment/:repoId`. */
 export function RepoDetailPage() {
   const { repoId } = useParams<{ repoId: string }>();
   const { data: repo, isPending, isError, error, refetch } = useRepo(repoId);
@@ -36,7 +36,7 @@ export function RepoDetailPage() {
   if (isPending) {
     return (
       <div className="min-h-screen">
-        <ScmHeader />
+        <DeploymentHeader />
         <main className="mx-auto max-w-5xl px-4 py-6 sm:px-6">
           <Skeleton className="h-8 w-64" />
           <Skeleton className="mt-4 h-20" />
@@ -49,7 +49,7 @@ export function RepoDetailPage() {
   if (isError || !repo) {
     return (
       <div className="min-h-screen">
-        <ScmHeader />
+        <DeploymentHeader />
         <main className="mx-auto max-w-5xl px-4 py-6 sm:px-6">
           <ErrorBanner
             title="Could not load this repository"
@@ -71,7 +71,7 @@ export function RepoDetailPage() {
 
   return (
     <div className="min-h-screen">
-      <ScmHeader />
+      <DeploymentHeader />
 
       <main className="mx-auto flex max-w-5xl flex-col gap-6 px-4 py-6 sm:px-6">
         <div>

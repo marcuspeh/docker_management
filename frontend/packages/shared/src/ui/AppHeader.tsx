@@ -6,7 +6,7 @@ import { cn } from "../lib/cn";
 import { HealthBadge } from "./HealthBadge";
 
 export type AppHeaderProps = {
-  /** This app's title, "SCM" or "Containers". */
+  /** This app's title, "Deployment" or "Containers". */
   title: string;
   /** Where the link to the other app points. */
   otherAppUrl: string;
@@ -25,8 +25,8 @@ export function AppHeader({
   otherAppLabel,
   children,
 }: AppHeaderProps) {
-  const isScm = title.toLowerCase() === "scm";
-  const OtherIcon = isScm ? Box : GitBranch;
+  const isDeployment = title.toLowerCase() === "deployment";
+  const OtherIcon = isDeployment ? Box : GitBranch;
 
   return (
     <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/90 backdrop-blur">
@@ -61,19 +61,27 @@ export function AppHeader({
   );
 }
 
-/** The SCM app's header, linking to the Containers app. */
-export function ScmHeader({ children }: { children?: ReactNode }) {
+/** The Deployment app's header, linking to the Containers app. */
+export function DeploymentHeader({ children }: { children?: ReactNode }) {
   return (
-    <AppHeader title="SCM" otherAppUrl={config.containersUrl} otherAppLabel="Containers">
+    <AppHeader
+      title="Deployment"
+      otherAppUrl={config.containersUrl}
+      otherAppLabel="Containers"
+    >
       {children}
     </AppHeader>
   );
 }
 
-/** The Containers app's header, linking to the SCM app. */
+/** The Containers app's header, linking to the Deployment app. */
 export function ContainersHeader({ children }: { children?: ReactNode }) {
   return (
-    <AppHeader title="Containers" otherAppUrl={config.scmUrl} otherAppLabel="SCM">
+    <AppHeader
+      title="Containers"
+      otherAppUrl={config.deploymentUrl}
+      otherAppLabel="Deployment"
+    >
       {children}
     </AppHeader>
   );

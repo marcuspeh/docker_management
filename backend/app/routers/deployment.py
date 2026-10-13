@@ -1,4 +1,4 @@
-"""SCM endpoints: repositories, branches, deployments and stack actions."""
+"""Deployment endpoints: repositories, branches, deployments and stack actions."""
 
 from __future__ import annotations
 
@@ -30,7 +30,7 @@ from ..services import git_service as git_svc
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(tags=["scm"])
+router = APIRouter(tags=["deployment"])
 
 
 def get_repo_or_404(repo_id: str, session: Session) -> Repo:
