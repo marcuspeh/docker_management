@@ -12,7 +12,6 @@ import asyncio
 import contextlib
 import json
 import logging
-import subprocess
 import uuid
 from collections import deque
 from collections.abc import AsyncIterator
@@ -26,6 +25,22 @@ logger = logging.getLogger(__name__)
 
 #: Re-exported for the startup recovery sweep in main.py.
 RUNNING_STATUSES = ("queued", "running")
+
+
+def _redact(arg: str) -> str:
+    """Strip ``user:password@`` from anything that looks like a URL.
+
+    A repository registered as ``https://token@host/org/repo.git`` would
+    otherwise leak the token into the streamed log and the database.
+    """
+    scheme, sep, rest = arg.partition("://")
+    if not sep or "@" not in rest:
+        return arg
+    userinfo, _, host = rest.rpartition("@")
+    if not userinfo:
+        return arg
+    user = userinfo.split(":", 1)[0]
+    return f"{scheme}://{user}:***@{host}"
 
 
 @dataclass
@@ -53,7 +68,10 @@ class DeploymentLog:
         self._next_seq = 1
         self.steps: list[StepEvent] = []
         self.done: dict[str, Any] | None = None
-        self._subscribers: set[asyncio.Queue] = set()
+        # Subscriber queue -> the loop it is awaited on. Lines are appended from
+        # a worker thread (see run_streaming), so publishing has to hop back
+        # onto the owning loop rather than touching the queue directly.
+        self._subscribers: dict[asyncio.Queue, asyncio.AbstractEventLoop] = {}
         self._lock = asyncio.Lock()
 
     def append(self, text: str) -> LogLine:
@@ -64,8 +82,12 @@ class DeploymentLog:
         return line
 
     def command(self, argv: list[str]) -> None:
-        """Echo the command before its output, prefixed with ``$``."""
-        self.append("$ " + " ".join(argv))
+        """Echo the command before its output, prefixed with ``$``.
+
+        Credentials embedded in a remote URL are redacted: this text is streamed
+        to every client watching the deploy and persisted in ``deployment.log``.
+        """
+        self.append("$ " + " ".join(_redact(arg) for arg in argv))
 
     def step(self, name: str, status: str) -> None:
         event = StepEvent(step=name, status=status)
@@ -93,19 +115,61 @@ class DeploymentLog:
     def lines_from(self, offset: int) -> list[LogLine]:
         return [line for line in self._lines if line.seq > offset]
 
+    def evicted_before(self, offset: int) -> bool:
+        """True when the client wants lines the ring has already discarded."""
+        return bool(self._lines) and self._lines[0].seq > offset + 1
+
+    def truncation_notice(self, offset: int) -> str:
+        return (
+            f"! output truncated: lines up to {self._lines[0].seq - 1} are no "
+            "longer buffered"
+        )
+
     def _publish(self, event: dict[str, Any]) -> None:
-        for queue in list(self._subscribers):
-            with contextlib.suppress(asyncio.QueueFull):
+        # The terminal event is what ends a subscriber's stream, so it must
+        # never be dropped: a full queue drops the oldest line to make room.
+        terminal = event.get("type") == "done"
+        for queue, loop in list(self._subscribers.items()):
+            self._offer(queue, loop, event, terminal)
+
+    @staticmethod
+    def _offer(
+        queue: asyncio.Queue,
+        loop: asyncio.AbstractEventLoop,
+        event: dict[str, Any],
+        terminal: bool,
+    ) -> None:
+        def put() -> None:
+            try:
                 queue.put_nowait(event)
+            except asyncio.QueueFull:
+                if not terminal:
+                    return
+                # Make room by discarding the oldest buffered event.
+                with contextlib.suppress(asyncio.QueueEmpty):
+                    queue.get_nowait()
+                with contextlib.suppress(asyncio.QueueFull):
+                    queue.put_nowait(event)
 
-    async def subscribe(self) -> AsyncIterator[dict[str, Any]]:
-        """Yield events as they happen, then stop once the deployment is done.
+        try:
+            running = asyncio.get_running_loop()
+        except RuntimeError:
+            running = None
+        if running is loop:
+            put()
+        else:
+            loop.call_soon_threadsafe(put)
 
-        A client disconnecting simply abandons the generator; there is nothing
-        to clean up because the runner owns all the real state.
-        """
+    def _register(self) -> tuple[asyncio.Queue, asyncio.AbstractEventLoop]:
+        loop = asyncio.get_running_loop()
         queue: asyncio.Queue = asyncio.Queue(maxsize=1000)
-        self._subscribers.add(queue)
+        self._subscribers[queue] = loop
+        return queue, loop
+
+    def _unregister(self, queue: asyncio.Queue) -> None:
+        self._subscribers.pop(queue, None)
+
+    async def _follow(self, queue: asyncio.Queue) -> AsyncIterator[dict[str, Any]]:
         try:
             while True:
                 event = await queue.get()
@@ -113,7 +177,17 @@ class DeploymentLog:
                 if event.get("type") == "done":
                     return
         finally:
-            self._subscribers.discard(queue)
+            self._unregister(queue)
+
+    async def subscribe(self) -> AsyncIterator[dict[str, Any]]:
+        """Yield events as they happen, then stop once the deployment is done.
+
+        A client disconnecting simply abandons the generator; there is nothing
+        to clean up because the runner owns all the real state.
+        """
+        queue, _loop = self._register()
+        async for event in self._follow(queue):
+            yield event
 
 
 class DeploymentJob:
@@ -123,7 +197,8 @@ class DeploymentJob:
         self.id = deployment_id
         self.repo_id = repo_id
         self.log = DeploymentLog()
-        self.process: subprocess.Popen | None = None
+        # The asyncio child spawned by run_streaming, if one is running.
+        self.process: asyncio.subprocess.Process | None = None
         self.cancelled = False
         self.finished = asyncio.Event()
 
@@ -131,16 +206,15 @@ class DeploymentJob:
         """Kill the running compose/git command.
 
         Cancelling before the ``up`` step means the previously deployed
-        containers are left running.
+        containers are left running. Only the flag is set here: the child is
+        stopped by whoever owns the loop, since terminating a process from an
+        arbitrary thread is not safe.
         """
         self.cancelled = True
-        if self.process is not None and self.process.poll() is None:
+        proc = self.process
+        if proc is not None and proc.returncode is None:
             with contextlib.suppress(ProcessLookupError):
-                self.process.terminate()
-                try:
-                    self.process.wait(timeout=10)
-                except subprocess.TimeoutExpired:
-                    self.process.kill()
+                proc.terminate()
 
 
 # Live jobs, keyed by deployment id.
@@ -200,33 +274,76 @@ def load_saved_log(stored: str) -> DeploymentLog:
     return log
 
 
+async def _replay(log: DeploymentLog, offset: int) -> AsyncIterator[dict[str, Any]]:
+    """Replay buffered lines from ``offset``, flagging any evicted gap."""
+    if log.evicted_before(offset):
+        yield {
+            "type": "line",
+            "line": {"seq": offset, "text": log.truncation_notice(offset)},
+        }
+    for line in log.lines_from(offset):
+        yield {"type": "line", "line": {"seq": line.seq, "text": line.text}}
+
+
 async def replay_and_follow(
-    log: DeploymentLog, offset: int
+    log: DeploymentLog, offset: int, *, live: bool = False
 ) -> AsyncIterator[dict[str, Any]]:
     """Yield the saved log from ``offset`` and then live events.
 
     A deployment that already finished replays its stored log and emits
     ``done`` without touching the runner. Otherwise the replay is followed by
     live events from the running job.
+
+    ``live`` says whether a runner owns this log. Without it there is nothing
+    that will ever publish, so a stored log with no terminal payload (a deploy
+    interrupted by a restart) gets a synthesised ``done`` instead of hanging.
     """
     if log.done is not None:
-        for line in log.lines_from(offset):
-            yield {"type": "line", "line": {"seq": line.seq, "text": line.text}}
+        async for event in _replay(log, offset):
+            yield event
         for step in log.steps:
             yield {"type": "step", "step": {"step": step.step, "status": step.status}}
         yield {"type": "done", **log.done}
         return
 
-    for line in log.lines_from(offset):
-        yield {"type": "line", "line": {"seq": line.seq, "text": line.text}}
+    if not live:
+        # Nothing owns this log, so whatever is buffered is all there is.
+        async for event in _replay(log, offset):
+            yield event
+        yield {"type": "done", "status": "failed", "commitSha": None,
+               "commitMessage": None,
+               "error": "This deployment's output is no longer available."}
+        return
 
-    # Steps already emitted before this client connected are replayed too, so a
-    # mid-deploy subscriber sees the same sequence as one present from the start.
-    for step in log.steps:
-        yield {"type": "step", "step": {"step": step.step, "status": step.status}}
+    # Subscribe before snapshotting the buffer, otherwise anything published
+    # during the replay would be lost: the replay awaits on the client socket,
+    # so the runner can finish in that window.
+    queue, _loop = log._register()
+    highest = offset
+    try:
+        async for event in _replay(log, offset):
+            if event["type"] == "line":
+                highest = max(highest, event["line"]["seq"])
+            yield event
 
-    async for event in log.subscribe():
-        yield event
+        # Steps carry no sequence number, so a mid-deploy client sees the whole
+        # step list again. It is the full history by design: the client keys
+        # them and ignores repeats.
+        for step in log.steps:
+            yield {"type": "step", "step": {"step": step.step, "status": step.status}}
+
+        async for event in log._follow(queue):
+            # The queue may already hold lines the replay just sent.
+            if event.get("type") == "line":
+                seq = event["line"]["seq"]
+                if seq <= highest:
+                    continue
+                highest = seq
+            yield event
+            if event.get("type") == "done":
+                return
+    finally:
+        log._unregister(queue)
 
 
 async def run_streaming(
@@ -239,39 +356,56 @@ async def run_streaming(
 ) -> int:
     """Run a command, feeding each output line into the job's log buffer.
 
-    Blocking read and process management run in a worker thread so the event
-    loop keeps serving SSE clients while a build is in progress.
+    The child is spawned on the event loop with ``create_subprocess_exec`` so a
+    timeout can actually kill it. Running it in a worker thread instead would
+    leave the process alive after the timeout fired, still mutating containers
+    while the deployment had already been recorded as failed.
     """
     job.log.command(argv)
 
-    def _pump() -> int:
-        proc = subprocess.Popen(
-            argv,
-            cwd=str(cwd) if cwd else None,
-            env=env,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            bufsize=1,
-        )
-        job.process = proc
+    proc = await asyncio.create_subprocess_exec(
+        *argv,
+        cwd=str(cwd) if cwd else None,
+        env=env,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.STDOUT,
+    )
+    job.process = proc
+
+    async def pump() -> None:
         assert proc.stdout is not None
-        try:
-            for raw in proc.stdout:
-                job.log.append(raw.rstrip("\n"))
-        finally:
-            proc.stdout.close()
-            proc.wait()
-        job.process = None
-        return proc.returncode
+        while True:
+            raw = await proc.stdout.readline()
+            if not raw:
+                break
+            job.log.append(raw.decode(errors="replace").rstrip("\n"))
 
     try:
-        return await asyncio.wait_for(
-            asyncio.to_thread(_pump), timeout=timeout or settings.compose_timeout_seconds
+        await asyncio.wait_for(
+            pump(), timeout=timeout or settings.compose_timeout_seconds
         )
     except asyncio.TimeoutError:
         job.log.append("! command timed out")
+        await _terminate(proc)
         return 124
+    finally:
+        job.process = None
+
+    return proc.returncode if proc.returncode is not None else await proc.wait()
+
+
+async def _terminate(proc) -> None:
+    """Stop a child and reap it, escalating to SIGKILL if it ignores SIGTERM."""
+    if proc.returncode is not None:
+        return
+    with contextlib.suppress(ProcessLookupError):
+        proc.terminate()
+    try:
+        await asyncio.wait_for(proc.wait(), timeout=10)
+    except asyncio.TimeoutError:
+        with contextlib.suppress(ProcessLookupError):
+            proc.kill()
+        await proc.wait()
 
 
 def new_deployment_id() -> str:

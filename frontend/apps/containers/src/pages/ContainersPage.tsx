@@ -9,7 +9,7 @@ import {
   toApiError,
   type Network,
 } from "@portal/shared";
-import { useContainers, useNetworks } from "../queries";
+import { useAllContainers, useContainers, useNetworks } from "../queries";
 import { ContainerCard } from "../components/ContainerCard";
 import { ConnectContainersModal } from "../components/ConnectContainersModal";
 import { CreateNetworkModal } from "../components/CreateNetworkModal";
@@ -37,6 +37,8 @@ export function ContainersPage() {
   const filters = useMemo(() => ({ network: network ?? undefined, repoId: repoId ?? undefined }), [network, repoId]);
   const { data: containers, isPending, isError, error, refetch, isFetching } =
     useContainers(filters);
+  // The connect modal needs candidates from every network, not this view's slice.
+  const { data: allContainers } = useAllContainers();
 
   const update = (patch: Record<string, string | null>) => {
     const next = new URLSearchParams(searchParams);
@@ -159,16 +161,30 @@ export function ContainersPage() {
         </section>
       </main>
 
-      <CreateNetworkModal open={modal === "create-network"} onClose={closeModal} />
-      <ConnectContainersModal
-        network={modal === "connect" ? targetNetwork : null}
-        containers={containers}
-        onClose={closeModal}
-      />
-      <DeleteNetworkModal
-        network={modal === "delete-network" ? targetNetwork : null}
-        onClose={closeModal}
-      />
+      {/* Mounted only while open, so each session starts with clean state. */}
+      {modal === "create-network" && (
+        <CreateNetworkModal open onClose={closeModal} />
+      )}
+      {modal === "connect" && (
+        <ConnectContainersModal
+          network={targetNetwork}
+          containers={allContainers}
+          onClose={closeModal}
+        />
+      )}
+      {modal === "delete-network" && (
+        <DeleteNetworkModal
+          network={targetNetwork}
+          onClose={() => {
+            // Deleting the network currently being filtered on would otherwise
+            // leave a filter nothing in the sidebar matches.
+            if (targetNetwork && network === targetNetwork.name) {
+              update({ network: null });
+            }
+            closeModal();
+          }}
+        />
+      )}
     </div>
   );
 }

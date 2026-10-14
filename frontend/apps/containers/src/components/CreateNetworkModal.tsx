@@ -7,6 +7,10 @@ export type CreateNetworkModalProps = {
   onClose: () => void;
 };
 
+/**
+ * The body is keyed on `open` by the page, so remounting on each open is what
+ * clears the previous attempt's name and error.
+ */
 export function CreateNetworkModal({ open, onClose }: CreateNetworkModalProps) {
   const [name, setName] = useState("");
   const [error, setError] = useState<string | undefined>();

@@ -8,7 +8,9 @@ blocking, so each is wrapped in a worker thread.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import functools
+import threading
 from collections.abc import AsyncIterator
 from datetime import datetime, timezone
 from typing import Any
@@ -21,6 +23,7 @@ from ..errors import ApiError, ErrorCode
 from ..schemas import ContainerOut, NetworkOut, PortOut
 
 _client: docker.DockerClient | None = None
+_client_lock = threading.Lock()
 
 COMPOSE_PROJECT_LABEL = "com.docker.compose.project"
 COMPOSE_SERVICE_LABEL = "com.docker.compose.service"
@@ -29,15 +32,26 @@ BUILTIN_NETWORKS = {"bridge", "host", "none"}
 
 
 def get_client() -> docker.DockerClient:
-    """Shared SDK client bound to the host daemon via the mounted socket."""
+    """Shared SDK client bound to the host daemon via the mounted socket.
+
+    Guarded by a lock: this is reached from worker threads as well as the event
+    loop, and two racing constructions would leak one client's connection pool.
+    """
     global _client
     if _client is None:
-        _client = docker.DockerClient(base_url=settings.docker_socket)
+        with _client_lock:
+            if _client is None:
+                _client = docker.DockerClient(base_url=settings.docker_socket)
     return _client
 
 
-async def _in_thread(fn, *args, **kwargs):
+async def in_thread(fn, *args, **kwargs):
+    """Run a blocking SDK call off the event loop."""
     return await asyncio.to_thread(functools.partial(fn, *args, **kwargs))
+
+
+#: Internal alias kept for the many call sites in this module.
+_in_thread = in_thread
 
 
 def reset_client() -> None:
@@ -282,7 +296,7 @@ async def container_action(
     except DockerException as exc:
         raise wrap_docker_error(exc, action) from exc
 
-    container.reload()
+    await _in_thread(container.reload)
     return container_to_out(container)
 
 
@@ -297,7 +311,9 @@ def _network_to_out(network, slug_to_compose: dict[str, str] | None = None) -> N
     name = attrs.get("Name") or ""
 
     project = labels.get(COMPOSE_PROJECT_LABEL)
-    compose_managed = bool(project) or name.endswith("_default")
+    # Ownership comes from the compose label alone. A `_default` name heuristic
+    # also flagged unrelated user networks, which then could not be deleted.
+    compose_managed = bool(project)
 
     return NetworkOut(
         id=attrs.get("Id") or network.id,
@@ -347,7 +363,12 @@ async def create_network(name: str, driver: str = "bridge", internal: bool = Fal
     return _network_to_out(network)
 
 
-def resolve_network(network_id: str):
+async def resolve_network(network_id: str):
+    """Async wrapper: every SDK call blocks, so it belongs off the event loop."""
+    return await _in_thread(_resolve_network_sync, network_id)
+
+
+def _resolve_network_sync(network_id: str):
     client = get_client()
     try:
         return client.networks.get(network_id)
@@ -358,9 +379,13 @@ def resolve_network(network_id: str):
     raise ApiError(ErrorCode.NOT_FOUND, "Network not found.")
 
 
-def require_mutable_network(network_id: str):
+async def require_mutable_network(network_id: str):
     """Resolve a network, refusing built-in and compose-owned networks."""
-    network = resolve_network(network_id)
+    return await _in_thread(_require_mutable_network_sync, network_id)
+
+
+def _require_mutable_network_sync(network_id: str):
+    network = _resolve_network_sync(network_id)
     described = _network_to_out(network)
     if described.builtin:
         raise ApiError(
@@ -445,9 +470,30 @@ async def stream_logs(
     separate stderr stream to read in that case.
 
     Yields a final ``{"type": "end"}`` once the container stops.
+
+    The follower threads are stopped when the consumer goes away. Without that
+    they stay blocked on the daemon's log stream for the life of the container,
+    and they share the default executor with every other blocking call, so a few
+    abandoned log panels would stall the whole service.
     """
-    container = resolve_container(container_id)
+    container = await _in_thread(resolve_container, container_id)
+    loop = asyncio.get_running_loop()
     queue: asyncio.Queue = asyncio.Queue(maxsize=2000)
+    # Read at most one chunk ahead so a blocked reader notices the stop flag.
+    stop = threading.Event()
+
+    def publish(event: dict[str, Any]) -> None:
+        """Enqueue from a worker thread, dropping the oldest line when full."""
+        def put() -> None:
+            while True:
+                try:
+                    queue.put_nowait(event)
+                    return
+                except asyncio.QueueFull:
+                    with contextlib.suppress(asyncio.QueueEmpty):
+                        queue.get_nowait()
+
+        loop.call_soon_threadsafe(put)
 
     def make_follower(stream: str) -> None:
         def _pump() -> None:
@@ -460,9 +506,11 @@ async def stream_logs(
                     since=since or None,
                     follow=True,
                 ):
+                    if stop.is_set():
+                        break
                     ts, _, msg = raw.rstrip("\n").partition(" ")
                     when = _parse_time(ts) or datetime.now(timezone.utc)
-                    queue.put_nowait(
+                    publish(
                         {
                             "type": "log",
                             "time": when.isoformat(),
@@ -473,22 +521,26 @@ async def stream_logs(
             except (APIError, DockerException):
                 pass
             finally:
-                queue.put_nowait({"type": "eof", "stream": stream})
+                publish({"type": "eof", "stream": stream})
 
-        asyncio.get_running_loop().run_in_executor(None, _pump)
+        return loop.run_in_executor(None, _pump)
 
-    make_follower("stdout")
-    make_follower("stderr")
+    futures = [make_follower("stdout"), make_follower("stderr")]
 
     open_streams = 2
-    while open_streams > 0:
-        event = await queue.get()
-        if event.get("type") == "eof":
-            open_streams -= 1
-            continue
-        yield event
-
-    yield {"type": "end"}
+    try:
+        while open_streams > 0:
+            event = await queue.get()
+            if event.get("type") == "eof":
+                open_streams -= 1
+                continue
+            yield event
+        yield {"type": "end"}
+    finally:
+        # Runs on normal completion and on client disconnect alike.
+        stop.set()
+        for future in futures:
+            future.cancel()
 
 
 def _logs_sync(container_id: str, tail: int | str, since: str | None) -> str:

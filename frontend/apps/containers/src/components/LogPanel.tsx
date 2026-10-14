@@ -33,10 +33,16 @@ export function LogPanel({ container }: LogPanelProps) {
   const [stopped, setStopped] = useState(false);
   const lastTime = useRef<string | null>(null);
   const counter = useRef(0);
+  // Docker's `since` is inclusive, so resuming from the last rendered line
+  // replays it. This holds that line so the repeat can be dropped.
+  const lastDelivered = useRef<string | null>(null);
 
   const onLog = useCallback((data: unknown) => {
     const line = data as LogLine;
     if (!line || typeof line.msg !== "string") return;
+    const key = `${line.time ?? ""}|${line.msg}`;
+    if (lastDelivered.current === key) return;
+    lastDelivered.current = key;
     if (line.time) lastTime.current = line.time;
     counter.current += 1;
 
@@ -63,6 +69,8 @@ export function LogPanel({ container }: LogPanelProps) {
     return lastTime.current ? { since: lastTime.current } : {};
   }, []);
 
+  // Clears `stopped` as well as bumping the attempt, otherwise the stream stays
+  // gated off and Reconnect does nothing.
   const { state, failed, reconnect } = useEventSource(
     apiUrl(`/api/containers/${container.id}/logs`),
     handlers,
@@ -73,6 +81,11 @@ export function LogPanel({ container }: LogPanelProps) {
       closeOn: ["end"],
     },
   );
+
+  const onReconnect = useCallback(() => {
+    setStopped(false);
+    reconnect();
+  }, [reconnect]);
 
   return (
     <div className="flex flex-col gap-2">
@@ -91,7 +104,7 @@ export function LogPanel({ container }: LogPanelProps) {
             <span className="text-xs text-slate-500">Container stopped</span>
           )}
           {(failed || stopped) && (
-            <Button variant="secondary" size="sm" onClick={reconnect}>
+            <Button variant="secondary" size="sm" onClick={onReconnect}>
               Reconnect
             </Button>
           )}

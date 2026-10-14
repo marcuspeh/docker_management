@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import logging
+import shutil
 from dataclasses import dataclass
 
 from sqlmodel import Session, select
@@ -18,6 +19,7 @@ from ..db import session_scope
 from ..errors import ApiError, ErrorCode
 from ..models import Deployment, NetworkAttachment, Repo, utcnow
 from . import compose_service, docker_service, git_service, jobs
+from .docker_service import in_thread as _in_thread
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +74,12 @@ async def step_source(job: jobs.DeploymentJob, repo: RepoSnapshot) -> None:
             raise StepFailed("clone", "Could not clone the repository.")
         job.log.step("clone", "succeeded")
         return
+
+    # A clone interrupted by a cancel or a restart can leave a .git that never
+    # finished being written. Fetching into it fails forever, so re-clone.
+    if not await _in_thread(git_service.is_usable_clone, repo.slug):
+        job.log.append("! existing clone is incomplete, re-cloning")
+        shutil.rmtree(clone, ignore_errors=True)
 
     job.log.step("fetch", "started")
     rc = await _git(job, ["fetch", "--prune", "origin"], cwd=clone)
@@ -234,6 +242,16 @@ async def run_pipeline(
         deployment = session.get(Deployment, deployment_id)
         repo = session.get(Repo, repo_id)
         if deployment is None or repo is None:
+            # The row is gone, so there is nothing to persist, but subscribers
+            # still need a terminal event or the stream would hang forever.
+            job.log.finish(
+                {
+                    "status": "cancelled",
+                    "commitSha": None,
+                    "commitMessage": None,
+                    "error": "The repository was deleted during this deployment.",
+                }
+            )
             job.finished.set()
             jobs.release_job(deployment_id)
             return
@@ -244,6 +262,11 @@ async def run_pipeline(
     commit_message: str | None = None
 
     try:
+        # A deployment cancelled while it was queued behind the repo lock has no
+        # process to kill, so the flag is only ever seen here. Checking it up
+        # front avoids running a full clone and build the user already stopped.
+        if job.cancelled:
+            raise StepFailed("Deployment cancelled.")
         await step_source(job, repo)
         commit_sha, commit_message = await step_checkout(job, repo, branch, commit)
         await step_build(job, repo, branch, commit)
@@ -285,18 +308,24 @@ def _settle(
         }
     )
 
-    with session_scope() as session:
-        deployment = session.get(Deployment, deployment_id)
-        if deployment is not None:
-            deployment.status = status
-            deployment.commit_sha = commit_sha
-            deployment.commit_message = commit_message
-            deployment.error = error
-            deployment.log = job.log.snapshot()
-            deployment.finished_at = utcnow()
-
-    job.finished.set()
-    jobs.release_job(deployment_id)
+    # The job must be released even if persisting fails, otherwise it stays
+    # "running" in memory and every later deploy for this repo is refused with
+    # DEPLOY_IN_PROGRESS until the backend restarts.
+    try:
+        with session_scope() as session:
+            deployment = session.get(Deployment, deployment_id)
+            if deployment is not None:
+                deployment.status = status
+                deployment.commit_sha = commit_sha
+                deployment.commit_message = commit_message
+                deployment.error = error
+                deployment.log = job.log.snapshot()
+                deployment.finished_at = utcnow()
+    except Exception:
+        logger.exception("Could not persist the result of deployment %s", deployment_id)
+    finally:
+        job.finished.set()
+        jobs.release_job(deployment_id)
 
 
 # --------------------------------------------------------------------------- #
@@ -305,7 +334,23 @@ def _settle(
 async def stack_action(repo: Repo, action: str) -> list:
     """Run a compose stack action and return the project's containers."""
     if action == "up":
-        code, output = await compose_service.up(repo.slug, repo.path, repo.compose_file)
+        # Same GIT_* the pipeline exports, so a compose file interpolating them
+        # resolves the same values a deploy would have.
+        with session_scope() as session:
+            last = session.exec(
+                select(Deployment)
+                .where(Deployment.repo_id == repo.id)
+                .order_by(Deployment.started_at.desc())
+                .limit(1)
+            ).first()
+        branch = last.branch if last is not None else repo.default_branch
+        commit = last.commit_sha if last is not None else None
+        code, output = await compose_service.up(
+            repo.slug,
+            repo.path,
+            repo.compose_file,
+            extra_env=_git_env(branch, commit),
+        )
         if code != 0:
             raise ApiError(
                 ErrorCode.DOCKER_ERROR,

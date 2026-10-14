@@ -334,15 +334,15 @@ async def stream_deployment_logs(
 
     deployment = get_deployment_or_404(deployment_id, session)
 
-    live = jobs.get_job(deployment_id)
-    if live is not None:
-        log = live.log
-    else:
-        # A finished (or restarted) deployment replays from its stored log.
-        log = jobs.load_saved_log(deployment.log)
+    job = jobs.get_job(deployment_id)
+    log = job.log if job is not None else jobs.load_saved_log(deployment.log)
 
     async def event_source():
-        async for event in jobs.replay_and_follow(log, offset):
+        # `live` tells the replayer whether a runner owns this log: without one
+        # there is nothing to follow, so it must not wait for events.
+        async for event in jobs.replay_and_follow(
+            log, offset, live=job is not None
+        ):
             if event.get("type") == "line":
                 yield {
                     "event": "line",

@@ -130,9 +130,10 @@ class TestNetworkMapping:
         out = docker_service._network_to_out(FakeNetwork("app_default", compose=True))
         assert out.compose_managed is True
 
-    def test_default_suffix_implies_compose_managed(self):
+    def test_default_suffix_alone_is_not_compose_managed(self):
+        """Ownership comes from the label, so a user's `_default` stays deletable."""
         out = docker_service._network_to_out(FakeNetwork("my-app_default"))
-        assert out.compose_managed is True
+        assert out.compose_managed is False
 
     def test_user_network_is_plain(self):
         out = docker_service._network_to_out(FakeNetwork("shared"))

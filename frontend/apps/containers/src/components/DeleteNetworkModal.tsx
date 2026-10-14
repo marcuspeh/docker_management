@@ -7,6 +7,10 @@ export type DeleteNetworkModalProps = {
   onClose: () => void;
 };
 
+/**
+ * Mounted only while open, so a previous failure cannot survive into the next
+ * network's confirmation.
+ */
 export function DeleteNetworkModal({ network, onClose }: DeleteNetworkModalProps) {
   const deleteNetwork = useDeleteNetwork();
 

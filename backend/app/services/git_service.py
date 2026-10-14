@@ -118,6 +118,20 @@ def is_cloned(slug: str) -> bool:
     return (clone_dir(slug) / ".git").exists()
 
 
+def is_usable_clone(slug: str) -> bool:
+    """True when the clone is complete enough to fetch into.
+
+    ``is_cloned`` only sees a ``.git`` directory, which a clone interrupted by a
+    cancel or a restart can leave behind half-written. ``rev-parse`` succeeding
+    means git itself considers the repository usable.
+    """
+    clone = clone_dir(slug)
+    if not (clone / ".git").exists():
+        return False
+    result = run_git(["rev-parse", "--git-dir"], cwd=clone, timeout=10)
+    return result.ok
+
+
 # --------------------------------------------------------------------------- #
 # Command execution
 # --------------------------------------------------------------------------- #
@@ -137,8 +151,14 @@ def run_git(
     *,
     cwd: Path | None = None,
     timeout: float | None = None,
+    remote: bool = True,
 ) -> GitResult:
-    """Run git synchronously. Callers wrap this in ``asyncio.to_thread``."""
+    """Run git synchronously. Callers wrap this in ``asyncio.to_thread``.
+
+    ``remote`` says whether the command contacts the remote. A timeout on a
+    local-only command (rev-parse, log, checkout) is not an unreachable repo,
+    so it gets GIT_ERROR rather than REPO_UNREACHABLE.
+    """
     try:
         proc = subprocess.run(
             ["git", *args],
@@ -150,11 +170,13 @@ def run_git(
             check=False,
         )
     except subprocess.TimeoutExpired as exc:
-        raise ApiError(
-            ErrorCode.REPO_UNREACHABLE,
-            "Git timed out while contacting the remote.",
-            {"stderr": str(exc)},
-        ) from exc
+        code = ErrorCode.REPO_UNREACHABLE if remote else ErrorCode.GIT_ERROR
+        message = (
+            "Git timed out while contacting the remote."
+            if remote
+            else "Git timed out on a local command."
+        )
+        raise ApiError(code, message, {"stderr": str(exc)}) from exc
     except FileNotFoundError as exc:  # pragma: no cover - git always present in image
         raise ApiError(
             ErrorCode.GIT_ERROR, "git executable not found on the server."
@@ -162,9 +184,11 @@ def run_git(
     return GitResult(proc.returncode, proc.stdout, proc.stderr)
 
 
-async def git(*args: str, cwd: Path | None = None, timeout: float | None = None) -> GitResult:
+async def git(
+    *args: str, cwd: Path | None = None, timeout: float | None = None, remote: bool = True
+) -> GitResult:
     return await asyncio.to_thread(
-        functools.partial(run_git, list(args), cwd=cwd, timeout=timeout)
+        functools.partial(run_git, list(args), cwd=cwd, timeout=timeout, remote=remote)
     )
 
 
@@ -251,14 +275,14 @@ async def checkout_commit(dest: Path, sha: str) -> None:
 
 
 async def rev_parse(dest: Path, ref: str = "HEAD") -> str:
-    result = await git("rev-parse", ref, cwd=dest)
+    result = await git("rev-parse", ref, cwd=dest, remote=False)
     if not result.ok:
         _raise_git_error(result, f"resolve {ref}")
     return result.stdout.strip()
 
 
 async def commit_subject(dest: Path, ref: str = "HEAD") -> str | None:
-    result = await git("log", "-1", "--format=%s", ref, cwd=dest)
+    result = await git("log", "-1", "--format=%s", ref, cwd=dest, remote=False)
     return result.stdout.strip() if result.ok else None
 
 
@@ -270,6 +294,7 @@ async def log_commits(dest: Path, branch: str, limit: int = 20) -> list[dict]:
         "--format=%H%x1f%s%x1f%an%x1f%cI",
         "origin/" + branch,
         cwd=dest,
+        remote=False,
     )
     if not result.ok:
         raise ApiError(

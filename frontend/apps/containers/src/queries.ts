@@ -36,6 +36,24 @@ export function useContainers(filters: { network?: string; repoId?: string }) {
   });
 }
 
+/**
+ * Every container, unfiltered.
+ *
+ * The connect modal needs this: given the page's already-filtered list, the
+ * only candidates would be containers on the current network, and every one of
+ * them is excluded as already attached.
+ */
+export function useAllContainers() {
+  return useQuery({
+    queryKey: containerKey({}),
+    queryFn: () =>
+      api.get<Container[]>("/api/containers", { query: { all: true } }),
+    // The main list already polls; this exists only to populate a modal, so it
+    // never needs to poll on its own.
+    staleTime: 5_000,
+  });
+}
+
 function useInvalidateContainers() {
   const queryClient = useQueryClient();
   return () => queryClient.invalidateQueries({ queryKey: ["containers"] });

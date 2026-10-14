@@ -12,6 +12,9 @@ export type ConnectContainersModalProps = {
  * Connects several containers to a network at once. The API answers per
  * container, so a partial success lists each failure instead of reporting the
  * whole request as failed.
+ *
+ * Mounted only while open, so a selection made for one network cannot still be
+ * ticked when another is opened.
  */
 export function ConnectContainersModal({
   network,

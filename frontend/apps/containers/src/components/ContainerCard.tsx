@@ -96,6 +96,7 @@ export function ContainerCard({ container, logsOpen, onToggleLogs }: ContainerCa
             <Button
               variant="secondary"
               size="sm"
+              disabled={action.isPending}
               loading={pendingFor("stop") === "stop"}
               onClick={() => run("stop")}
             >
@@ -107,6 +108,7 @@ export function ContainerCard({ container, logsOpen, onToggleLogs }: ContainerCa
               <Button
                 variant="secondary"
                 size="sm"
+                disabled={action.isPending}
                 loading={pendingFor("start") === "start"}
                 onClick={() => run("start")}
               >
@@ -116,6 +118,7 @@ export function ContainerCard({ container, logsOpen, onToggleLogs }: ContainerCa
               <Button
                 variant="secondary"
                 size="sm"
+                disabled={action.isPending}
                 loading={pendingFor("restart") === "restart"}
                 onClick={() => run("restart")}
               >

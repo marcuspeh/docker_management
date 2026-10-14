@@ -157,7 +157,7 @@ async def disconnect(
     payload: DisconnectRequest,
     session: Session = Depends(get_session),
 ) -> ConnectResponse:
-    network = docker_service.resolve_network(network_id)
+    network = await docker_service.resolve_network(network_id)
     real_id = network.attrs.get("Id") or network_id
     network_name = network.attrs.get("Name") or network_id
 

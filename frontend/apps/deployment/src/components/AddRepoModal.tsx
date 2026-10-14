@@ -9,7 +9,9 @@ import {
 } from "@portal/shared";
 import { useCreateRepo } from "../queries";
 
-type FieldErrors = Partial<Record<"name" | "url" | "path", string>>;
+type FieldErrors = Partial<
+  Record<"name" | "url" | "path" | "composeFile", string>
+>;
 
 export type AddRepoModalProps = {
   open: boolean;
@@ -57,7 +59,14 @@ export function AddRepoModal({ open, onClose }: AddRepoModalProps) {
               setErrors({ name: apiError.message });
               break;
             case "INVALID_PATH":
-              setErrors({ path: apiError.message });
+              // The backend names the field: compose-file problems arrive with
+              // INVALID_PATH too, so routing by code alone showed them under
+              // the path input.
+              setErrors(
+                apiError.field === "composeFile"
+                  ? { composeFile: apiError.message }
+                  : { path: apiError.message },
+              );
               break;
             case "REPO_UNREACHABLE": {
               const stderr = apiError.detail.stderr;
@@ -125,6 +134,7 @@ export function AddRepoModal({ open, onClose }: AddRepoModalProps) {
           placeholder="docker-compose.yml"
           className="font-mono"
           value={form.composeFile ?? "docker-compose.yml"}
+          error={errors.composeFile}
           onChange={(event) => update({ composeFile: event.target.value })}
         />
       </div>

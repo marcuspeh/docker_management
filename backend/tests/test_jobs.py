@@ -98,6 +98,87 @@ class TestReplay:
         """A malformed log must not break the stream."""
         assert jobs.load_saved_log(stored).done is None
 
+    async def test_unowned_log_without_done_terminates(self):
+        """A deploy interrupted by a restart has no runner, so the stream must
+        end on its own instead of waiting for an event that never comes."""
+        log = jobs.DeploymentLog()
+        log.append("partial output")
+
+        events = await asyncio.wait_for(collect(log, offset=0), timeout=5)
+        assert events[-1]["type"] == "done"
+        assert [e["line"]["text"] for e in events if e["type"] == "line"] == [
+            "partial output"
+        ]
+
+    async def test_empty_stored_log_terminates(self):
+        """`Deployment.log` defaults to '[]', which is the same situation."""
+        log = jobs.load_saved_log("[]")
+        events = await asyncio.wait_for(collect(log, offset=0), timeout=5)
+        assert events[-1]["type"] == "done"
+
+    async def test_live_replay_does_not_duplicate_lines(self):
+        """Subscribing before the replay means a line published in between is
+        both buffered and queued, and must reach the client only once."""
+        log = jobs.DeploymentLog()
+        log.append("one")
+        events: list[dict] = []
+
+        async def consume():
+            async for event in jobs.replay_and_follow(log, 0, live=True):
+                events.append(event)
+                # Yield to the runner so it can publish mid-replay.
+                await asyncio.sleep(0)
+                if event.get("type") == "done":
+                    return
+
+        task = asyncio.create_task(consume())
+        await asyncio.sleep(0)  # let the subscriber register
+        log.append("two")
+        log.finish({"status": "success", "commitSha": None,
+                    "commitMessage": None, "error": None})
+        await asyncio.wait_for(task, timeout=5)
+
+        texts = [e["line"]["text"] for e in events if e["type"] == "line"]
+        assert texts == ["one", "two"]
+        assert events[-1]["type"] == "done"
+
+    async def test_done_survives_a_full_subscriber_queue(self):
+        """A stalled client must still learn the deployment finished."""
+        log = jobs.DeploymentLog()
+        queue, _loop = log._register()
+        for i in range(1100):
+            log.append(f"flood {i}")
+        log.finish({"status": "success", "commitSha": None,
+                    "commitMessage": None, "error": None})
+
+        drained = []
+        while True:
+            event = await asyncio.wait_for(queue.get(), timeout=5)
+            drained.append(event)
+            if event["type"] == "done":
+                break
+        assert drained[-1]["type"] == "done"
+
+    async def test_truncation_is_reported(self):
+        """A resume older than the ring must say so rather than skip silently."""
+        log = jobs.DeploymentLog(limit=3)
+        for i in range(6):
+            log.append(f"line {i}")
+        log.finish({"status": "success", "commitSha": None,
+                    "commitMessage": None, "error": None})
+
+        events = await collect(log, offset=0)
+        first = events[0]
+        assert first["type"] == "line"
+        assert "truncated" in first["line"]["text"]
+
+    async def test_credentials_are_redacted_from_the_command_echo(self):
+        log = jobs.DeploymentLog()
+        log.command(["git", "clone", "https://user:ghp_secret@host/acme/app.git"])
+        text = log._lines[0].text
+        assert "ghp_secret" not in text
+        assert "user:***@host" in text
+
     async def test_live_subscriber_receives_events_then_done(self):
         log = jobs.DeploymentLog()
         received: list[dict] = []

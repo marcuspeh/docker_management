@@ -31,7 +31,16 @@ export function RepoDetailPage() {
     newest && (newest.status === "running" || newest.status === "queued")
       ? newest.id
       : null;
-  const activeDeploymentId = pinnedDeploymentId ?? runningNewest;
+  // A deployment followed implicitly stops being "newest running" the moment it
+  // finishes, which would unmount the panel and throw away the output the user
+  // is watching. Latching the id during render keeps the finished log on
+  // screen, and the history takes over from there.
+  const [lastFollowedId, setLastFollowedId] = useState<string | null>(null);
+  if (runningNewest && runningNewest !== lastFollowedId) {
+    setLastFollowedId(runningNewest);
+  }
+  const activeDeploymentId =
+    pinnedDeploymentId ?? runningNewest ?? lastFollowedId;
 
   if (isPending) {
     return (

@@ -10,7 +10,7 @@ export function RepoCard({ repo }: RepoCardProps) {
 
   return (
     <Link
-      to={{ pathname: `/${repo.id}`, search: last ? "?tab=output" : "" }}
+      to={`/${repo.id}`}
       className="block rounded-lg border border-slate-200 bg-white p-4 transition-colors hover:border-blue-300 hover:bg-blue-50/30"
     >
       <div className="flex items-start justify-between gap-4">
