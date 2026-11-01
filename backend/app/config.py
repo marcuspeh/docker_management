@@ -6,10 +6,13 @@ deployment overrides the workspace and database locations via the environment.
 
 from __future__ import annotations
 
+import json
 from functools import lru_cache
 from pathlib import Path
+from typing import Annotated
 
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import field_validator
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -24,7 +27,25 @@ class Settings(BaseSettings):
 
     # Left empty by default: the apps are served from the same origin as the API.
     # Set explicitly (comma separated) only when an app is hosted elsewhere.
-    cors_origins: list[str] = []
+    # NoDecode keeps the raw string so the validator below can split on commas;
+    # without it pydantic-settings tries to parse the value as JSON first and
+    # refuses a plain comma separated list.
+    cors_origins: Annotated[list[str], NoDecode] = []
+
+    @field_validator("cors_origins", mode="before")
+    @classmethod
+    def _split_cors_origins(cls, value: object) -> list[str]:
+        """Accept a comma separated list or a JSON array of origins."""
+        if value is None or value == "":
+            return []
+        if isinstance(value, list):
+            return [str(item).strip() for item in value if str(item).strip()]
+
+        text = str(value).strip()
+        if text.startswith("["):
+            parsed = json.loads(text)
+            return [str(item).strip() for item in parsed if str(item).strip()]
+        return [part.strip() for part in text.split(",") if part.strip()]
 
     # Production builds of the two web apps.
     deployment_dist_dir: Path = Path("/app/web/deployment")
@@ -45,6 +66,12 @@ class Settings(BaseSettings):
 
     # Label marking the portal's own container so it can be excluded and refused.
     self_label: str = "portal.self"
+
+    # The network the portal and nginx share. The portal refuses to delete it:
+    # removing it would cut nginx off from the API. It is matched by name
+    # because a network declared `external` is only resolved by Compose, never
+    # labelled by it.
+    portal_network: str = "portal"
 
     @property
     def database_path(self) -> Path | None:

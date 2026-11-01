@@ -1,0 +1,30 @@
+# Portal frontend: nginx serving both web apps and proxying /api to the
+# backend in ../backend.
+#
+# Only nginx binds a host port, and only on the loopback interface: there is no
+# authentication in v1, so the portal must not be reachable from the network.
+
+services:
+  web:
+    build:
+      context: .
+    ports:
+      - "127.0.0.1:8000:80"
+    # No depends_on: the backend lives in ../backend and is a separate compose
+    # project, so it cannot be a dependency here. nginx resolves the backend
+    # at request time instead, so it starts whether or not the API is up yet.
+    labels:
+      # Marks this container so the portal excludes it from the container list
+      # and refuses to stop it.
+      portal.self: "true"
+    networks:
+      - portal
+    restart: unless-stopped
+
+networks:
+  # Shared with the backend stack, where the API listens on port 8000.
+  # It is external so neither stack owns its lifecycle: `docker compose down`
+  # in either folder leaves it in place.
+  portal:
+    name: portal
+    external: true

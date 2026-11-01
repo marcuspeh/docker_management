@@ -21,7 +21,7 @@ The API contract lives in the backend document and is the interface all three pa
   - The supplied prototype is a visual and behavioral reference only.
 - **Build:** two images, one Dockerfile per top-level folder. `backend/Dockerfile` builds the API; `frontend/Dockerfile` builds both web apps into a single nginx image.
 - **Hosting:** nginx serves both apps from one origin and proxies `/api` to the backend, so `CORS_ORIGINS` stays off by default. The backend is a pure API service and publishes no host port; only nginx binds `127.0.0.1:8000`. Either app can be hosted elsewhere by setting `VITE_API_BASE_URL` and the backend's `CORS_ORIGINS`.
-- **Deploy model:** Docker Compose. Only the latest build is kept, and each deployment records its branch and commit hash.
+- **Deploy model:** Docker Compose, one stack per top-level folder: `backend/docker-compose.yml` and `frontend/docker-compose.yml`. The two stacks share one external Docker network named `portal`, over which nginx reaches the API by service name. Only the latest build is kept, and each deployment records its branch and commit hash.
 - **Runtime:** two containers on the host, sharing the host's `/var/run/docker.sock`. Docker-in-Docker is not used.
 - **Auth:** none in v1. The portal is bound to `127.0.0.1`.
 
@@ -80,7 +80,7 @@ flowchart LR
 - [x] Type check, ESLint, Vitest for the shared package and key modals; build and serve each app on its own
 
 **Delivery**
-- [x] `backend/Dockerfile` (Python runtime plus the Docker CLI and compose plugin), `frontend/Dockerfile` (node build stage into nginx), `nginx.conf`, `docker-compose.yml` wiring both services, README
+- [x] `backend/Dockerfile` (Python runtime plus the Docker CLI and compose plugin), `frontend/Dockerfile` (node build stage into nginx), `nginx.conf`, `backend/docker-compose.yml` and `frontend/docker-compose.yml` wiring both stacks over a shared external network, README
 - [ ] Manual end-to-end check covering every Deployment and Containers interaction from the sample, with each app opened on its own (needs the frontend apps)
 
 ## Out of scope for v1

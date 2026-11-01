@@ -118,8 +118,6 @@ class FakeNetwork:
             "IPAM": {"Config": [{"Subnet": "172.20.0.0/16"}]},
             "Containers": {"c1": {}, "c2": {}},
         }
-
-
 class TestNetworkMapping:
     @pytest.mark.parametrize("name", ["bridge", "host", "none"])
     def test_builtin_networks_flagged(self, name):
@@ -139,6 +137,15 @@ class TestNetworkMapping:
         out = docker_service._network_to_out(FakeNetwork("shared"))
         assert out.builtin is False
         assert out.compose_managed is False
+
+    def test_portal_network_is_marked_self_owned(self):
+        """The network shared with nginx must not be deletable."""
+        out = docker_service._network_to_out(FakeNetwork("portal"))
+        assert out.self_owned is True
+
+    def test_other_network_is_not_self_owned(self):
+        out = docker_service._network_to_out(FakeNetwork("shared"))
+        assert out.self_owned is False
 
     def test_subnet_and_container_count(self):
         out = docker_service._network_to_out(FakeNetwork("shared"))

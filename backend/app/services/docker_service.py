@@ -188,6 +188,15 @@ def resolve_container(container_id: str):
     raise ApiError(ErrorCode.NOT_FOUND, "Container not found.")
 
 
+def is_self_network(name: str | None) -> bool:
+    """True when a network is the one the portal shares with nginx.
+
+    Matched by name rather than by label: a network declared ``external`` is
+    only resolved by Compose, never created or labelled by it.
+    """
+    return bool(name) and name == settings.portal_network
+
+
 def is_self(container) -> bool:
     labels = (container.attrs.get("Config") or {}).get("Labels") or {}
     return str(labels.get(settings.self_label, "")).lower() == "true"
@@ -324,6 +333,10 @@ def _network_to_out(network, slug_to_compose: dict[str, str] | None = None) -> N
         internal=bool(attrs.get("Internal")),
         builtin=name in BUILTIN_NETWORKS,
         compose_managed=compose_managed,
+        # The portal's own network is shared with the frontend stack, so
+        # deleting it would cut nginx off from the API. It is matched by name:
+        # a network declared `external` is never labelled by Compose.
+        self_owned=is_self_network(name),
         container_count=len(attrs.get("Containers") or {}),
     )
 
@@ -395,6 +408,11 @@ def _require_mutable_network_sync(network_id: str):
         raise ApiError(
             ErrorCode.PROTECTED,
             "This network belongs to a compose project and cannot be deleted.",
+        )
+    if described.self_owned:
+        raise ApiError(
+            ErrorCode.PROTECTED,
+            "This network is the portal's own and cannot be deleted.",
         )
     return network
 

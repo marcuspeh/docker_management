@@ -14,6 +14,7 @@ const network: Network = {
   internal: false,
   builtin: false,
   composeManaged: false,
+  selfOwned: false,
   containerCount: 1,
 };
 

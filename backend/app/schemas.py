@@ -164,6 +164,7 @@ class NetworkOut(ApiModel):
     internal: bool
     builtin: bool
     compose_managed: bool
+    self_owned: bool = False
     container_count: int
 
 

@@ -190,7 +190,7 @@ type LogLine = { time: string; stream: "stdout" | "stderr"; msg: string };
 - `POST /api/networks` with `{ name, driver?: "bridge", internal?: false }` returns `201 Network`. Returns `NAME_TAKEN` if the name exists.
 - `DELETE /api/networks/{id}` returns 204.
   - It disconnects attached containers first and removes any saved attachments.
-  - Returns `PROTECTED` for built-in networks and for networks that belong to a compose project.
+  - Returns `PROTECTED` for built-in networks, for networks that belong to a compose project, and for the portal's own network (`PORTAL_NETWORK`, default `portal`), which is shared with the nginx stack.
 - `POST /api/networks/{id}/connect` with `{ containerIds: string[], aliases?: string[] }` returns `{ connected: string[], failed: { containerId, error }[] }`.
   - For containers the portal deployed, it also saves a `NetworkAttachment` so the connection is restored after a redeploy.
 - `POST /api/networks/{id}/disconnect` with `{ containerIds: string[] }` returns the same shape. It also deletes any saved attachment.
@@ -208,7 +208,7 @@ Containers and networks themselves aren't stored. They're read live from Docker.
 backend/
   app/
     main.py              # app factory, /api router, static mounts for both apps + SPA fallback, startup tasks
-    config.py            # WORKSPACE_DIR, DB_URL, CORS_ORIGINS, DEPLOYMENT_DIST_DIR, CONTAINERS_DIST_DIR, timeouts
+    config.py            # WORKSPACE_DIR, DB_URL, CORS_ORIGINS, PORTAL_NETWORK, DEPLOYMENT_DIST_DIR, CONTAINERS_DIST_DIR, timeouts
     db.py  models.py     # SQLModel engine + tables
     schemas.py           # request/response models (camelCase aliases)
     errors.py            # ApiError + exception handlers -> error envelope
@@ -248,12 +248,18 @@ backend/
 
 ## Deployment
 
+The backend and the frontend are separate compose projects. They share one
+external Docker network named `portal`, over which nginx reaches the API by
+service name.
+
+`backend/docker-compose.yml`:
+
 ```yaml
 services:
   portal:
     build: .
-    ports:
-      - "127.0.0.1:8000:8000"
+    expose:
+      - "8000"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - /srv/portal:/srv/portal
@@ -263,12 +269,50 @@ services:
       DB_URL: sqlite:////srv/portal/portal.db
     labels:
       portal.self: "true"
+    networks:
+      - portal
     restart: unless-stopped
+
+networks:
+  portal:
+    name: portal
+    external: true
 ```
 
+`frontend/docker-compose.yml`:
+
+```yaml
+services:
+  web:
+    build: .
+    ports:
+      - "127.0.0.1:8000:80"
+    labels:
+      portal.self: "true"
+    networks:
+      - portal
+    restart: unless-stopped
+
+networks:
+  portal:
+    name: portal
+    external: true
+```
+
+- The network is `external`, so it must be created once
+  (`docker network create portal`) before either stack starts, and neither
+  stack's `docker compose down` removes it.
+- The backend publishes no host port: nginx is the only entry point. nginx
+  resolves the backend per request rather than at startup, so it starts
+  whether or not the API is up yet.
+- Both containers carry the `portal.self` label, so the portal excludes them
+  from the container list and refuses to stop them.
 - The image is built in stages:
-  - Stage 1 (`node:lts-slim`) runs `npm ci` and `npm run build` in `frontend/`, producing `apps/deployment/dist` and `apps/containers/dist`.
-  - Stage 2 (`python:3.12-slim`) adds `git` and `openssh-client`, plus the Docker CLI and compose plugin copied from `docker:cli`. It installs the backend and copies both `dist` folders to `/app/web/deployment` and `/app/web/containers`.
+  - Stage 1 (`node:lts-slim`) runs `npm install` and `npm run build` in
+    `frontend/`, producing `apps/deployment/dist` and `apps/containers/dist`.
+  - Stage 2 (`python:3.12-slim`) adds `git` and `openssh-client`, plus the
+    Docker CLI and compose plugin copied from `docker:cli`. It installs the
+    backend.
 - The workspace is mounted at the same path inside and outside the container, so relative bind mounts in compose files resolve correctly on the host.
 - The process runs as root for socket access, or as a non-root user with `group_add` set to the host's docker group ID.
 - The README covers Git credentials and `known_hosts`, the same-path mount requirement, and the warning that Docker socket access equals root on the host while there's no auth.

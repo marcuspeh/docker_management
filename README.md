@@ -32,6 +32,10 @@ nginx  ->  /deployment/        Deployment app
                           +--> git remotes (SSH or HTTPS)
 ```
 
+The two stacks talk over a shared Docker network named `portal`. nginx
+resolves the backend per request, so it starts whether or not the API is up
+yet and picks it up as soon as it appears.
+
 Compose reaches the daemon in two ways, on purpose:
 
 - **Docker CLI via subprocess** for `build`, `up`, `down`, `stop` and `restart`,
@@ -46,12 +50,24 @@ networks is stored in the database.
 
 ## Deploying
 
+The backend and the frontend are separate stacks, each with its own compose
+file. They share one Docker network, so nginx can reach the API by service
+name.
+
 ```bash
 mkdir -p /srv/portal
-docker compose up -d --build
+docker network create portal
+
+cd backend && docker compose up -d --build
+cd ../frontend && docker compose up -d --build
 ```
 
 Then open <http://127.0.0.1:8000/deployment/>.
+
+The shared network is declared `external`, so neither stack owns it: it must
+exist before either stack starts, and `docker compose down` in either folder
+leaves it in place. The portal refuses to delete it, so it cannot be removed
+from the Containers app either.
 
 The workspace must be mounted at the **same path inside and outside** the
 container (`/srv/portal:/srv/portal`). Compose files in your repositories often
@@ -78,12 +94,13 @@ All settings are environment variables read by `backend/app/config.py`.
 |---|---|---|
 | `WORKSPACE_DIR` | `/srv/portal/repos` | Where repository clones live |
 | `DB_URL` | `sqlite:////srv/portal/portal.db` | SQLite location |
-| `CORS_ORIGINS` | empty | Only needed if an app is hosted on another origin |
+| `CORS_ORIGINS` | empty | Only needed if an app is hosted on another origin. Comma separated, or a JSON array |
 | `DEPLOYMENT_DIST_DIR` | `/app/web/deployment` | Deployment app build output |
 | `CONTAINERS_DIST_DIR` | `/app/web/containers` | Containers app build output |
 | `GIT_TIMEOUT_SECONDS` | `20` | Timeout for `git ls-remote` |
 | `COMPOSE_TIMEOUT_SECONDS` | `3600` | Timeout for one compose command |
 | `LOG_BUFFER_LINES` | `10000` | In-memory log lines kept per running deploy |
+| `PORTAL_NETWORK` | `portal` | The network shared with nginx. The portal refuses to delete it |
 
 Both apps are served from the same origin as the API, so `CORS_ORIGINS` stays
 off. To host an app elsewhere, build it with `VITE_API_BASE_URL` pointing at the
@@ -157,7 +174,12 @@ backend/
     routers/
       health.py  deployment.py  containers.py  networks.py
   tests/
+  Dockerfile
+  docker-compose.yml     the API stack
 frontend/                the two Vite apps and their shared package
+  Dockerfile
+  nginx.conf
+  docker-compose.yml     the nginx stack
 docs/                    backend and frontend tech design
 ```
 

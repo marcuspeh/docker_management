@@ -98,6 +98,8 @@ export type Network = {
   internal: boolean;
   builtin: boolean;
   composeManaged: boolean;
+  /** The portal's own network, shared with the frontend stack. */
+  selfOwned: boolean;
   containerCount: number;
 };
 

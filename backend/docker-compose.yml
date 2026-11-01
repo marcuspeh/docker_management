@@ -1,12 +1,13 @@
-# Portal deployment: the API and the nginx-served web apps.
+# Portal backend: the API that drives the host's Docker daemon.
 #
-# Only nginx binds a host port, and only on the loopback interface: there is no
-# authentication in v1, so the portal must not be reachable from the network.
+# No published port: nginx in ../frontend is the only entry point, and it
+# reaches this service over the shared `portal` network. There is no
+# authentication in v1, so the API must not be reachable from the network.
 
 services:
   portal:
     build:
-      context: ./backend
+      context: .
     # No published port: nginx is the only entry point.
     expose:
       - "8000"
@@ -27,13 +28,14 @@ services:
     labels:
       # Marks this container so the portal excludes and refuses to stop itself.
       portal.self: "true"
-    restart: unless-stopped
-
-  web:
-    build:
-      context: ./frontend
-    ports:
-      - "127.0.0.1:8000:80"
-    depends_on:
+    networks:
       - portal
     restart: unless-stopped
+
+networks:
+  # Shared with the frontend stack, where nginx proxies /api to this service.
+  # It is external so neither stack owns its lifecycle: `docker compose down`
+  # in either folder leaves it in place.
+  portal:
+    name: portal
+    external: true

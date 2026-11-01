@@ -9,7 +9,7 @@ dependencies = [
     "sqlmodel>=0.0.22",
     "docker>=7.1",
     "sse-starlette>=2.1",
-    "pydantic-settings>=2.6",
+    "pydantic-settings>=2.7",
 ]
 
 [project.optional-dependencies]

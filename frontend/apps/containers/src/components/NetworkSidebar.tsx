@@ -12,8 +12,9 @@ export type NetworkSidebarProps = {
 };
 
 /**
- * Networks by name and driver. Built-in and compose-owned networks are locked:
- * the backend refuses to delete them, so the page does not offer to.
+ * Networks by name and driver. Built-in, compose-owned and the portal's own
+ * networks are locked: the backend refuses to delete them, so the page does
+ * not offer to.
  */
 export function NetworkSidebar({
   networks,
@@ -47,7 +48,7 @@ export function NetworkSidebar({
           [0, 1, 2].map((n) => <Skeleton key={n} className="h-9" />)
         ) : (
           networks?.map((network) => {
-            const locked = network.builtin || network.composeManaged;
+            const locked = network.builtin || network.composeManaged || network.selfOwned;
             return (
               <NetworkRow
                 key={network.id}
